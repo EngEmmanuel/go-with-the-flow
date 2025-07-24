@@ -1,0 +1,19 @@
+# --index-url https://download.pytorch.org/whl/cu126
+# # Core ML libs (from PyTorch custom index)
+# torch
+# torchvision
+# Local editable install
+-e ./rectified-flow-pytorch
+
+
+# Other dependencies
+numpy
+matplotlib
+tqdm
+einops
+kornia
+wandb
+pandas
+hydra-core
+omegaconf
+
