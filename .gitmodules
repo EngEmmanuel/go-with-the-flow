@@ -1,3 +1,4 @@
 [submodule "rectified-flow-pytorch"]
 	path = rectified-flow-pytorch
 	url = https://github.com/lucidrains/rectified-flow-pytorch.git
+	branch = main

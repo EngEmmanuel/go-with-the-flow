@@ -1,27 +1,24 @@
-
-
-
-flow: RectifiedFlow
+flow: MeanFlow
 
 dataset:
   name: TestDataset  # or "EchoDataset"
-  data_path: E:/MICCAI2025/echo_dataset/tee/images  # Adjust path as needed
+  data_path: ./data/echonet/images #E:/MICCAI2025/echo_dataset/tee/images  # Adjust path as needed
   channels: 1
-  image_size: 128
+  image_size: 36
 
 model:
   dim: 64
   dim_mults: [1, 2, 4]
   channels: ${dataset.channels}
-  #accept_cond: True
-  #dim_cond: 64
+  accept_cond: True
+  dim_cond: 1
 
 trainer:
-  num_train_steps: 500000
+  num_train_steps: 5000
   learning_rate: 1e-4
-  batch_size: 24
+  batch_size: 1
   num_samples: 9
-  save_results_every: 10000
+  save_results_every: 1000
 
 hydra:
   run:
