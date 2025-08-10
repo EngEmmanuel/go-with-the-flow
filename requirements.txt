@@ -16,4 +16,6 @@ wandb
 pandas
 hydra-core
 omegaconf
-
+pytorch-lightning
+scikit-learn
+opencv-python
