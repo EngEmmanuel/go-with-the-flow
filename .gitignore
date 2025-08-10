@@ -1,7 +1,12 @@
 notes/
 experiments/
-hydra_outputs/
+outputs/
 .vscode/
+.cache/
+wandb/
+data/CAMUS_Processed
+
+*DS_Store
 
 # Byte-compiled / optimized / DLL files
 __pycache__/

@@ -118,7 +118,6 @@ import warnings
 
 from torchvision import tv_tensors
 
-tv_tensors.Video()
 
 # Import video loading utilities
 from utils.video_utils import load_video, resample_sequence
