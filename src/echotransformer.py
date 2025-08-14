@@ -61,3 +61,6 @@ class DiffusionTransformerWrapper(Module):
         )
 
         self.proj_out = nn.Linear(dim, dim_input)
+
+    def forward(self, x, times , cond = None):
+        pass
