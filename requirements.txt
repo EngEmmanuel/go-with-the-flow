@@ -21,3 +21,4 @@ scikit-learn
 opencv-python
 x-transformers
 denoising_diffusion_pytorch
+vit_pytorch

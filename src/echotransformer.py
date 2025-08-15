@@ -19,6 +19,10 @@ from denoising_diffusion_pytorch import (
     GaussianDiffusion1D
 )
 
+from vit_pytorch.vit_3d import ViT
+
+
+
 def divisible_by(num, den):
     return (num % den) == 0
 
@@ -44,7 +48,7 @@ class DiffusionTransformerWrapper(Module):
         self,
         dim_input,
         dim_time,
-        transformer: Encoder
+        transformer: Encoder | ViT
     ):
         super().__init__()
 
