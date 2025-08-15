@@ -18,7 +18,9 @@ dataloader:
 
 trainer:
   max_epochs: 100
-  lr: 1e-4
+  lr: 1e-5
+  fc_lr: 1e-4
+  weight_decay: 7e-5
 
 wandb:
   project: "ef_regression"

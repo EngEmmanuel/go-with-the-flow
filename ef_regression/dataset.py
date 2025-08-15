@@ -164,7 +164,7 @@ class CAMUSVideoEF(Dataset):
                 v2.Normalize(mean=[cfg.data_mean] * self.channels,
                             std=[cfg.data_std] * self.channels) # assumes grayscale so cfg.data_x will be one element
             ]
-            val_transforms = v2.Compose([
+            val_transforms =[
                 v2.Lambda(lambda x: x / 255.0),  # Scale to [0, 1]
                 v2.Resize(
                     [self.image_size] * 2,
@@ -174,7 +174,7 @@ class CAMUSVideoEF(Dataset):
                     mean=[cfg.data_mean] * self.channels,
                     std=[cfg.data_std] * self.channels
                 )
-            ])
+            ]
             self.transform = v2.Compose(train_transforms if "VAL" not in splits else val_transforms)
 
         # Preload data if requested

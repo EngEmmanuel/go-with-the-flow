@@ -19,3 +19,5 @@ omegaconf
 pytorch-lightning
 scikit-learn
 opencv-python
+x-transformers
+denoising_diffusion_pytorch
