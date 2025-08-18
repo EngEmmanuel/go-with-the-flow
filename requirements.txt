@@ -19,3 +19,7 @@ omegaconf
 pytorch-lightning
 scikit-learn
 opencv-python
+diffusers
+transformers
+xformers
+timm
