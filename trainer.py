@@ -1,19 +1,24 @@
+from venv import logger
 import torch
 import random
 import torch.nn as nn
 from torch import Tensor
 from torch.nn import Module, ModuleList
 import torch.optim as optim
+from torch.utils.data import DataLoader
 from typing import Literal, Callable
-from pytorch_lightning import LightningModule
+from pytorch_lightning import LightningModule, Trainer
+from pytorch_lightning.callbacks import ModelCheckpoint
 import wandb # type: ignore
 import sklearn.metrics
 from torchdiffeq import odeint
 import einx
+from pathlib import Path
 from einops import einsum, reduce, rearrange, repeat
 from einops.layers.torch import Rearrange
-from src.models import UNetSTIC, DiffuserSTDiT
 
+from src.models import UNetSTIC, DiffuserSTDiT
+from dataset.testdataset import FlowTestDataset
 def identity(t):
     return t
 
@@ -90,12 +95,18 @@ class LinearFlow(Module):
     @torch.no_grad()
     def sample(
         self, 
+        encoder_hidden_states: torch.Tensor, 
         batch_size=1, 
         steps=16, 
         noise=None, 
         data_shape: tuple[int, ...] | None = None,
         cond_image=None, 
         mask=None,
+        odeint_kwargs: dict = dict(
+            atol = 1e-5,
+            rtol = 1e-5,
+            method = 'midpoint'
+        ),
         use_ema: bool = False,
         **model_kwargs
     ):
@@ -104,17 +115,17 @@ class LinearFlow(Module):
         
         def ode_fn(t, x):
              #TODO Clip flow values
-            output = self.predict_flow(model, x, times=t, **model_kwargs)
+            output = self.predict_flow(model, x, times=t, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, mask=mask, **model_kwargs)
             return output
 
         # Start with random gaussian noise - y0
-        noise = default(noise, torch.randn(batch_size, *data_shape), device = self.device)
+        noise = default(noise, torch.randn(batch_size, *data_shape, device=self.device))
 
         # time steps
         time_steps = torch.linspace(0., 1., steps, device=self.device)
 
         # ode
-        trajectory = odeint(ode_fn, noise, time_steps)
+        trajectory = odeint(ode_fn, noise, time_steps, **odeint_kwargs)
 
         sampled_data = trajectory[-1]  # Get the last state as the sampled data
         
@@ -205,41 +216,66 @@ class FlowVideoGenerator(LightningModule):
 
 
     def training_step(self, batch, batch_idx):
-        loss = self.model(batch)
+        loss = self.model(**batch)
         self.log('train_loss', loss)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.model(batch)
+        loss = self.model(**batch)
         self.log('val_loss', loss)
         return loss
+
+    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+        # Increment counter
+        self._val_batch_counter += 1
+
+        if self._val_batch_counter % self.sample_every_n_val_steps == 0:
+            # Use this batch for sampling
+            batch.pop('x')
+            self.sample_from_batch(**batch)
+
+    def sample_from_batch(self, batch):
+        self.model.eval()
+        with torch.no_grad():
+            sampled_videos = self.model.sample(**batch)
+            self.save_latent_videos(sampled_videos, f"sampled_videos_val_step_{self._val_batch_counter}.pt")
+        self.model.train()
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
         return optimizer
+
+    
+    def save_latent_videos(self, latents: torch.Tensor, save_path: str, metadata: dict = {}):
+        """
+        Save latent videos and optional metadata to a PyTorch .pt file.
+        Args:
+            latents (torch.Tensor): Tensor of shape [B, C, T, H, W].
+            save_path (str): File path to save the tensor.
+            metadata (dict, optional): Additional info to save with latents.
+        """
+        save_path = Path(save_path)
+        save_path.parent.mkdir(parents=False, exist_ok=False)
+
+        # Create a dictionary to store
+        save_dict = {"latents": latents}
+        if metadata:
+            save_dict["metadata"] = metadata
+
+        torch.save(save_dict, save_path)
+
+
+
+    #TODO Add some sort of sample step?
 #TODO Complete me. Simple is best. Just see if things run. Use dummy tensors
 
 if __name__ == '__main__':
     device = select_device()
-
     # Mock data
     B, T, C, H, W = 2, 32, 4, 28, 28
-    video = torch.randn(B, T, C, H, W).to(device) # [B, T, C, H, W]
-    masked_video = torch.ones_like(video).to(device)
-    for i in range(video.shape[0]):
-        masked_video[i] = mask_random_frames(video[i], t=28)
-
-    cross_attention_dim = 32
-
-
-    video = video.permute(0, 2, 1, 3, 4).contiguous() # [B, C, T, H, W]
-    masked_video = masked_video.permute(0, 2, 1, 3, 4).contiguous() # [B, C, T, H, W]
-    ef = torch.rand(B).to(device)
-    # EF is a float per sample — treat it as a 1-dim token by expanding to match expected encoder_hidden_states
-    # Here we create encoder_hidden_states of shape [B, 1, 1] (seq_len=1, dim=1)
-    encoder_hidden_states = ef.view(B, 1, 1).expand(B, 1, cross_attention_dim)
-
-    assert video.shape[2] == masked_video.shape[2], "Temporal dimensions must match"
+    cross_attention_dim = 2
+    ds = FlowTestDataset(B=B, T=T, C=C, H=H, W=W, device=device, cross_attention_dim=cross_attention_dim)
+    dl = DataLoader(ds, batch_size=B)
     model = UNetSTIC(
         sample_size=H, #H,W of latent frame
         in_channels=C*2, # model expects concatenated x and cond_image along channels; use 2*C for test
@@ -261,13 +297,33 @@ if __name__ == '__main__':
     model = LinearFlow(model=model)
 
     # Perform a simple forward through the wrapper to get the model output
-    out = model(
-        video, 
-        encoder_hidden_states=encoder_hidden_states, 
-        cond_image=masked_video
-    )
+    batch = next(iter(dl))
+    out = model(**batch)
     print('out shape:', out.shape)
 
+    batch.pop('x')
+    latent_sample = model.sample(**batch, batch_size=B)
+
     #.
-    #.
-    
+    #
+    hydra_run_path = Path('.')
+    ckpt_callback = ModelCheckpoint(
+        monitor="val_loss",
+        dirpath=hydra_run_path / "checkpoints",
+        filename="flow-video-generator-{epoch:02d}-{val_loss:.2f}",
+        save_top_k=3,
+        mode="min"
+    )
+
+    lr_callback = LearningRateMonitor(logging_interval='step')
+
+    logger = WandbLogger(
+        project="go-with-the-flow",
+        
+    )
+    trainer = Trainer(
+        max_epochs=2,
+        logger=logger,
+        accelerator="auto",
+        precision=32,
+    )

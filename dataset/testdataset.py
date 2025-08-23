@@ -39,6 +39,7 @@ class FlowTestDataset(Dataset):
         self.H = H
         self.W = W
         self.device = device
+        self.cross_attention_dim = cross_attention_dim
         super().__init__()
 
 
@@ -63,18 +64,15 @@ class FlowTestDataset(Dataset):
 
     def __getitem__(self, idx):
         # Mock data
-        video = torch.randn(self.B, self.T, self.C, self.H, self.W).to(self.device) # [B, T, C, H, W]
-        masked_video = torch.ones_like(video).to(self.device)
-        for i in range(video.shape[0]):
-            masked_video[i] = self.mask_random_frames(video[i], t=28)
+        video = torch.randn(self.T, self.C, self.H, self.W).to(self.device) # [T, C, H, W]
+        masked_video = self.mask_random_frames(video, t=28).to(self.device)
 
-
-        video = video.permute(0, 2, 1, 3, 4).contiguous() # [B, C, T, H, W]
-        masked_video = masked_video.permute(0, 2, 1, 3, 4).contiguous() # [B, C, T, H, W]
-        ef = torch.rand(self.B).to(self.device)
+        video = video.permute(1, 0, 2, 3).contiguous() # [C, T, H, W]
+        masked_video = masked_video.permute(1, 0, 2, 3).contiguous() # [C, T, H, W]
+        ef = torch.rand(1).to(self.device)
         # EF is a float per sample — treat it as a 1-dim token by expanding to match expected encoder_hidden_states
         # Here we create encoder_hidden_states of shape [B, 1, 1] (seq_len=1, dim=1)
-        encoder_hidden_states = ef.view(self.B, 1, 1).expand(self.B, 1, self.cross_attention_dim)
+        encoder_hidden_states = ef.view(1, 1).expand(1, self.cross_attention_dim)
 
-        assert video.shape[2] == masked_video.shape[2], "Temporal dimensions must match"
-        return video, masked_video, encoder_hidden_states
+        assert video.shape[1] == masked_video.shape[1], "Temporal dimensions must match"
+        return {"x": video, "cond_image": masked_video, "encoder_hidden_states": encoder_hidden_states}
