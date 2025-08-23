@@ -5,6 +5,7 @@ outputs/
 .cache/
 wandb/
 data/CAMUS_Processed
+store/
 
 *DS_Store
 

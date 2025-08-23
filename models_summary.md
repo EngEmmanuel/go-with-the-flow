@@ -23,6 +23,13 @@ This document summarizes the four primary model classes and their main init/forw
   - `y`: Optional text tokens tensor `[B, 1, N_token, caption_channels]`
   - Returns: Tensor `[B, out_channels, T, H, W]`
 
+ - Intuitive meanings (common diffusion conventions):
+   - `x` is the noisy latent at diffusion timestep `t` (i.e. the video latent after noise has been added). The model operates in latent space and attempts to predict either the added noise (epsilon) or a denoised latent, depending on training objective.
+   - `timestep` selects the noise level/scale applied to `x`.
+   - `y` / `mask` are conditioning tokens used in cross-attention; they usually represent semantic prompts (text or learned tokens) and are not spatial images.
+   - `cond_image` (when used) supplies per-pixel conditional frames and is concatenated to `x` along channels; it provides spatial context (observed frames, masks, etc.).
+   - The returned tensor is model-dependent: in a noise-prediction setup it is the predicted noise (epsilon) that should be subtracted from `x` to obtain a cleaner latent; in a denoising direct-prediction setup it is the predicted denoised latent. Check the model checkpoint/training script to know which objective was used.
+
 ## 2) DiffuserSTDiT
 
 - File/class: `DiffuserSTDiT` (wrapper)
@@ -33,6 +40,12 @@ This document summarizes the four primary model classes and their main init/forw
   - `x`: `[B, C, T, H, W]`
   - `encoder_hidden_states`: `[B, 1, cross_attention_dim]` (or None)
   - Returns `DiffuserSTDiTModelOutput(sample=...)` where `sample` is `[B, out_channels, T, H, W]`.
+
+ - Intuitive meanings:
+   - `x` is the noisy video latent at the current diffusion timestep.
+   - `encoder_hidden_states` contains token embeddings (text or frame-level features) which the model uses via cross-attention; these are not spatial maps unless explicitly encoded as such.
+   - `cond_image` is spatial conditioning (per-frame images or masks) concatenated to `x` and provides observed pixel context.
+   - The `sample` field in the returned `DiffuserSTDiTModelOutput` follows the training objective: it is typically the model's prediction (commonly the noise term) and must be interpreted according to whether the checkpoint was trained to predict noise, velocity, or the clean latent.
 
 ## 3) UNetSTIC
 
@@ -51,6 +64,13 @@ This document summarizes the four primary model classes and their main init/forw
   - `encoder_hidden_states`: `[B, seq_len, cross_attention_dim]` used for cross-attention in several blocks.
   - Returns: `UNetSTICOutput.sample` of shape `[B, out_channels, T, H, W]`.
 
+ - Intuitive meanings:
+   - `x` is the noisy video latent (per-frame) at timestep `t` and is the primary input the UNet denoiser operates on.
+   - `timestep` encodes the noise level applied to `x`.
+   - `cond_image` carries spatial conditioning (observed frames, binary masks, or stacked context frames). It is concatenated channel-wise to `x` so the UNet receives both noisy input and observed context simultaneously.
+   - `encoder_hidden_states` are global token embeddings (text or pooled frame features) used via cross-attention; the UNet treats them as external context rather than per-pixel signals.
+   - The output `sample` is the model's prediction according to the training objective (commonly predicted noise epsilon). To obtain a denoised latent you either subtract the predicted noise from `x` (noise-prediction) or use the model output directly if it predicts clean latents.
+
 ## 4) SegDiTTransformer2DModel
 
 - File/class: `SegDiTTransformer2DModel` (ModelMixin, ConfigMixin)
@@ -62,6 +82,13 @@ This document summarizes the four primary model classes and their main init/forw
   - `hidden_states`: for continuous input expected shape `(B, C, H, W)`.
   - Optional `segmentation` is concatenated to channels: `hidden_states = torch.cat([hidden_states, segmentation], dim=1)`
   - Returns: `Transformer2DModelOutput(sample=...)` where `sample` is an image-shaped tensor `(B, out_channels, H, W)`.
+
+ - Intuitive meanings:
+   - `hidden_states` is the input image (or image latent) and for diffusion-style training is typically a noisy image at timestep `t`.
+   - `timestep` encodes the noise scale.
+   - `class_labels` provide class-conditioning (classifier-free guidance setups may randomly drop them during training).
+   - `segmentation` is a spatial conditioning map concatenated to the input channels (useful for segmentation-conditioned generation or inpainting masks).
+   - `sample` is the model's prediction; in diffusion setups it is commonly the predicted noise that was added to `hidden_states` and must be used in the sampling update rule appropriate for the trained objective.
 
 ---
 
