@@ -1,0 +1,6 @@
+type: transformer
+kwargs:
+  patch_size: [1, 2, 2]
+  num_heads: 8
+  caption_channels: 1
+  model_max_length: 1

@@ -1,0 +1,23 @@
+defaults:
+  - model: unet
+  - paths: ${env:HOSTNAME}
+  - __self__ # Last takes priority so any properties redefined here take precedence
+
+dataset:
+
+
+
+flow:
+  type: linear
+  kwargs:
+    clip_values: [-1, 1]
+
+trainer:
+  max_epochs: 2
+  precision: 32
+  accelerator: auto
+
+wandb:
+  project: go-with-the-flow
+  entity: engemmanuel
+  group: ${flow.type}
