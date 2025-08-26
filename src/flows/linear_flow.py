@@ -1,0 +1,160 @@
+import torch
+import torch.nn as nn
+from torch.nn import Module
+from torch import Tensor
+from torchdiffeq import odeint
+from einops import rearrange, repeat
+
+# Code adapted from https://github.com/lucidrains/rectified-flow-pytorch/blob/main/rectified_flow_pytorch/rectified_flow.py
+
+def identity(t):
+    return t
+
+def exists(v):
+    return v is not None
+
+def default(v, d):
+    return v if exists(v) else d
+
+# tensor helpers
+def append_dims(t, ndims):
+    shape = t.shape
+    return t.reshape(*shape, *((1,) * ndims))
+
+
+
+class LinearFlow(Module):
+    def __init__(
+            self,
+            model,
+            data_shape: tuple[int, ...] | None = None,
+            clip_values: tuple[float, float] = (-1., 1.),
+            **kwargs
+    ):
+        super().__init__()
+        self.model = model
+
+        self.data_shape = data_shape
+        self.noise_schedule = lambda x: x
+        self.clip_values = clip_values
+
+        self.loss_fn = nn.MSELoss()
+        # objective - either flow or noise
+        # self.predict = predict
+
+    @property
+    def device(self):
+        return next(self.model.parameters()).device
+
+    def sample_times(self, batch):
+        pass
+
+    @torch.no_grad()
+    def sample(
+        self, 
+        encoder_hidden_states: torch.Tensor, 
+        batch_size=1, 
+        steps=16, 
+        noise=None, 
+        data_shape: tuple[int, ...] | None = None,
+        cond_image=None, 
+        mask=None,
+        odeint_kwargs: dict = dict(
+            atol = 1e-5,
+            rtol = 1e-5,
+            method = 'midpoint'
+        ),
+        use_ema: bool = False,
+        **model_kwargs
+    ):
+
+        data_shape = default(data_shape, self.data_shape)
+
+        model = self.model
+
+        def ode_fn(t, x):
+             #TODO Clip flow values
+            output = self.predict_flow(model, x, times=t, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, mask=mask, **model_kwargs)
+            return output
+
+        # Start with random gaussian noise - y0
+        noise = default(noise, torch.randn(batch_size, *data_shape, device=self.device))
+
+        # time steps
+        time_steps = torch.linspace(0., 1., steps, device=self.device)
+
+        # ode
+        trajectory = odeint(ode_fn, noise, time_steps, **odeint_kwargs)
+
+        sampled_data = trajectory[-1]  # Get the last state as the sampled data
+        
+        return sampled_data
+    
+    # Keep model arg in case of ema
+    def predict_flow(self,
+                    model:Module, 
+                    noised, 
+                    *, 
+                    times, 
+                    encoder_hidden_states=None, 
+                    cond_image=None, 
+                    mask=None, 
+                    eps=1e-10, 
+                    **model_kwargs
+                ):
+
+        batch = noised.shape[0]
+        
+        # Prepare time conditioning for model
+        times = rearrange(times, '... -> (...)') # Flattens times
+
+        if times.numel() == 1:
+            times = repeat(times, '1 -> b', b = batch)
+
+        # Unet and STDiT forward(x, timestep, encoder_hidden_states=None, cond_image=None, mask=None, return_dict=True)
+
+        output = self.model(x=noised, timestep=times, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, mask=mask, **model_kwargs) # predicted flow / velocity field
+        if hasattr(output, 'sample'):
+            return output.sample
+        return output
+
+
+    def forward(
+            self, 
+            x, 
+            encoder_hidden_states: torch.Tensor, 
+            noise: Tensor | None = None,
+            cond_image=None, 
+            mask=None, 
+            **model_kwargs
+        ):
+
+        batch, *data_shape = x.shape
+        self.data_shape = default(self.data_shape, data_shape)
+
+        # x0 - gaussian noise, x1 - data
+        noise = default(noise, torch.randn_like(x))
+
+        times = torch.rand(batch, device = self.device)
+        padded_times = append_dims(times, x.ndim - 1)
+
+        def get_noised_and_flows(model, t):
+
+            # maybe noise schedule
+            t = self.noise_schedule(t)
+            noised = x * t + noise * (1 - t)
+
+            flow = x - noise
+            
+            pred_flow = self.predict_flow(model, noised, times=t, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, **model_kwargs)
+
+            pred_x = noised + pred_flow * (1 - t)
+
+            return flow, pred_flow, pred_x
+
+        # getting flow and pred flow for main model
+        flow, pred_flow, pred_x = get_noised_and_flows(self.model, padded_times)
+
+        main_loss = self.loss_fn(pred_flow, flow) #, pred_data = pred_x, times = times, data = x)
+
+        return main_loss
