@@ -9,6 +9,9 @@ from functools import lru_cache
 from typing import List, Optional, Union
 import warnings
 
+def _is_video_file(p: str):
+    ext = Path(p).suffix.lower()
+    return ext in ('.mp4', '.avi', '.mov', '.mkv', '.webm', '.wmv')
 
 # Use a reasonable cache size for video loading
 @lru_cache(maxsize=256)
