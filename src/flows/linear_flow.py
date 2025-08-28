@@ -36,7 +36,7 @@ class LinearFlow(Module):
 
         self.data_shape = data_shape
         self.noise_schedule = lambda x: x
-        self.clip_values = clip_values
+        self.clip_values = clip_values #TODO Implement clipping
 
         self.loss_fn = nn.MSELoss()
         # objective - either flow or noise

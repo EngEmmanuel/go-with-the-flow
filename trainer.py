@@ -18,6 +18,7 @@ import sklearn.metrics
 
 from src.models import UNetSTIC, DiffuserSTDiT
 from dataset.testdataset import FlowTestDataset
+from dataset.echodataset import EchoDataset
 from src.flows import LinearFlow
 
 
@@ -44,7 +45,9 @@ class FlowVideoGenerator(LightningModule):
     ):
         self.model = model
         self.cfg = cfg
+        self.sample_dir = kwargs.get("sample_dir", None)
 
+        self._val_counter = 0
 
     def training_step(self, batch, batch_idx):
         loss = self.model(**batch)
@@ -57,10 +60,13 @@ class FlowVideoGenerator(LightningModule):
         return loss
 
     def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+        if self.sample_dir is None:
+            return
+        
         # Increment counter
-        self._val_batch_counter += 1
+        self._val_counter += 1
 
-        if self._val_batch_counter % self.sample_every_n_val_steps == 0:
+        if self._val_counter % self.cfg.sample_every_n_val_steps == 0:
             # Use this batch for sampling
             batch.pop('x')
             self.sample_from_batch(**batch)
@@ -69,7 +75,7 @@ class FlowVideoGenerator(LightningModule):
         self.model.eval()
         with torch.no_grad():
             sampled_videos = self.model.sample(**batch)
-            self.save_latent_videos(sampled_videos, f"sampled_videos_val_step_{self._val_batch_counter}.pt")
+            self.save_latent_videos(sampled_videos, self.sample_dir / f"sampled_videos_step_{self.global_step}.pt")
         self.model.train()
 
     def configure_optimizers(self):
@@ -77,7 +83,7 @@ class FlowVideoGenerator(LightningModule):
         return optimizer
 
     
-    def save_latent_videos(self, latents: torch.Tensor, save_path: str, metadata: dict = {}):
+    def save_latent_videos(self, latents: torch.Tensor, save_path, metadata: dict = {}):
         """
         Save latent videos and optional metadata to a PyTorch .pt file.
         Args:
@@ -114,7 +120,7 @@ if __name__ == '__main__':
     if arch == "unet":
         model = UNetSTIC(
             sample_size=H, #H,W of latent frame
-            in_channels=C+C, # model expects concatenated x and cond_image along channels; use 2*C for test
+            in_channels=C+C+1, # model expects concatenated x and cond_image along channels; use 2*C for test
             out_channels=C, 
             num_frames=T,
             down_block_types = (
@@ -132,7 +138,7 @@ if __name__ == '__main__':
     else:
         model = DiffuserSTDiT(
             input_size=(T, H, W),
-            in_channels=C+C,
+            in_channels=C+C+1,
             out_channels=C,
             patch_size=(1, 2, 2),
             num_heads=8,
@@ -149,23 +155,25 @@ if __name__ == '__main__':
     batch.pop('x')
     latent_sample = model.sample(**batch, batch_size=B)
 
-    def load_model(cfg):
+    def load_model(cfg, data_shape, device):
+        T, C, H, W = data_shape
+
         match (cfg.model.type).lower():
             case "unet":
                 return UNetSTIC(
-                    sample_size=cfg.model.sample_size,
-                    in_channels=cfg.model.in_channels,
-                    out_channels=cfg.model.out_channels,
-                    num_frames=cfg.model.num_frames,
+                    sample_size=W, # (T, C, H, W)
+                    in_channels=C + C, # model expects concatenated x and cond_image along channels
+                    out_channels=C,
+                    num_frames=T,
                     **cfg.model.kwargs
-                )
+                ).to(device)
             case "transformer":
                 return DiffuserSTDiT(
-                    input_size=cfg.model.input_size,
-                    in_channels=cfg.model.in_channels,
-                    out_channels=cfg.model.out_channels,
+                    input_size=(T, H, W),
+                    in_channels=C + C,
+                    out_channels=C,
                     **cfg.model.kwargs
-                )
+                ).to(device)
         raise ValueError(f"Unsupported model type: {cfg.model.type}")
 
     # Function to load flow class
@@ -185,14 +193,25 @@ if __name__ == '__main__':
 
     @hydra.main(version_base=None, config_path="configs/flow_train", config_name="flow_train")
     def main(cfg: DictConfig):
+        # Setup output directories
         output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
         ckpt_dir = (output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
         sample_dir = (output_dir / "sample_videos").mkdir(parents=True, exist_ok=True)
 
-        model = load_model(cfg, model)
-        model = load_flow(cfg, model)
-        model = FlowVideoGenerator(model=model, cfg=cfg)
+        # Datasets and DataLoaders
+        train_ds = EchoDataset(cfg, split='train')
+        val_ds = EchoDataset(cfg, split='val')
 
+        train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True)
+        val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size)
+        data_shape = train_ds.shape # (T, C, H, W)
+
+        # Load model and flow wrapper
+        model = load_model(cfg, data_shape, device)
+        model = load_flow(cfg, model)
+        model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir)
+
+        # Define callbacks and logger(s)
         ckpt_callback = ModelCheckpoint(
             dirpath=ckpt_dir,
             filename='ckpt-e{epoch}-s{step}'
@@ -203,16 +222,18 @@ if __name__ == '__main__':
             **cfg.wandb
         )
 
+        # Instantiate trainer
         trainer = Trainer(
             logger=logger,
             callbacks=[ckpt_callback, lr_callback],
             **cfg.trainer
         )
 
-
+        # Train the model
         trainer.fit(model, train_dl, val_dl)
 
 
 
 
 
+#TODO Mask parameter?

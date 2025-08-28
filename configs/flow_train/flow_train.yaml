@@ -4,6 +4,9 @@ defaults:
   - __self__ # Last takes priority so any properties redefined here take precedence
 
 dataset:
+  path: data/CAMUS_Latents_4f8
+  max_frames: 32
+  batch_size: 4
 
 
 
@@ -16,8 +19,14 @@ trainer:
   max_epochs: 2
   precision: 32
   accelerator: auto
+  val_check_interval: 0.25
+  profiler: True
+
 
 wandb:
   project: go-with-the-flow
   entity: engemmanuel
   group: ${flow.type}
+
+
+sample_every_n_val_steps: 5
