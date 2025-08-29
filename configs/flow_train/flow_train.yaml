@@ -1,7 +1,7 @@
 defaults:
   - model: unet
-  - paths: ${env:HOSTNAME}
-  - __self__ # Last takes priority so any properties redefined here take precedence
+  #- paths: ${oc.env:HOSTNAME}
+  #- __self__ # Last takes priority so any properties redefined here take precedence
 
 dataset:
   path: data/CAMUS_Latents_4f8
@@ -16,11 +16,14 @@ flow:
     clip_values: [-1, 1]
 
 trainer:
-  max_epochs: 2
-  precision: 32
-  accelerator: auto
-  val_check_interval: 0.25
-  profiler: True
+  lr: 1e-4
+  kwargs:
+    max_epochs: 2
+    precision: 32
+    accelerator: auto
+    val_check_interval: 0.25
+    profiler: simple
+
 
 
 wandb:
@@ -30,3 +33,7 @@ wandb:
 
 
 sample_every_n_val_steps: 5
+
+hydra:
+  run:
+    dir: ./outputs/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
