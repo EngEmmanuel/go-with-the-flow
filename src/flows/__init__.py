@@ -1,1 +1,1 @@
-from linear_flow import LinearFlow
+from .linear_flow import LinearFlow
