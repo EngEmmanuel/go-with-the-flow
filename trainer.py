@@ -20,6 +20,15 @@ from src.models import UNetSTIC, DiffuserSTDiT
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
 from src.flows import LinearFlow
+from dataset import make_sampling_collate
+from vae.util import load_vae_and_processor
+
+
+
+def cycle(dl):
+    while True:
+        for batch in dl:
+            yield batch
 
 
 def select_device(force_cpu=False):
@@ -47,6 +56,8 @@ class FlowVideoGenerator(LightningModule):
         self.model = model
         self.cfg = cfg
         self.sample_dir = kwargs.get("sample_dir", None)
+        self.sample_dl = kwargs.get("sample_dl", None)
+        self.sample_dl = cycle(self.sample_dl) if self.sample_dl is not None else None
 
         self._val_counter = 0
 
@@ -63,48 +74,46 @@ class FlowVideoGenerator(LightningModule):
     def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
         if self.sample_dir is None or batch_idx != 0:
             return
-        
-        # Increment counter
-        self._val_counter += 1
 
         if self._val_counter % self.cfg.sample_every_n_val_steps == 0:
             # Use this batch for sampling
             self.print(f"Sampling at step {self.global_step}")
-            batch.pop('x')
-            self.sample_from_batch(batch)
+            #batch.pop('x')
+            #self.sample_from_batch(batch)
 
-    def sample_from_batch(self, batch):
-        #TODO Currently only tests reconstruction. Needs to be updated to test generation
-        save_path = self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"
+            self.sample()
 
-        batch_size, *_ = batch['cond_image'].shape
+        # Increment counter
+        self._val_counter += 1
+
+
+    def sample(self, n_videos_per_sample=2):
         self.model.eval()
-        with torch.no_grad():
-            sampled_videos = self.model.sample(**batch, batch_size=batch_size)
-            self.save_latent_videos(sampled_videos, save_path)
+        sample_results = {}
+        for n in range(n_videos_per_sample):
+            reference_batch, repeated_batch = next(self.sample_dl)
+            batch_size, *_ = repeated_batch['cond_image'].shape
 
-        self.print(f"Sampled videos saved to: {save_path}")
-        self.model.train()
+            with torch.no_grad():
+                sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
+            ef_values = reference_batch['ef_values']
+            sample_results[n] = {
+                "video_name": reference_batch['video_name'],
+                "cond_image": reference_batch['cond_image'],
+                'reconstructed': (sampled_videos[0,...], round(ef_values[0].item(), 3)),
+                'generated': (sampled_videos[1:,...], [round(x.item(), 3) for x in ef_values[1:]])
+            }
+
+            # TODO Check if data is unnormalized somewhere here when sampling
+        torch.save(
+            sample_results, 
+            self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"
+        )
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
         return optimizer
 
-    
-    def save_latent_videos(self, latents: torch.Tensor, save_path, metadata: dict = {}):
-        """
-        Save latent videos and optional metadata to a PyTorch .pt file.
-        Args:
-            latents (torch.Tensor): Tensor of shape [B, C, T, H, W].
-            save_path (str): File path to save the tensor.
-            metadata (dict, optional): Additional info to save with latents.
-        """
-        # Create a dictionary to store
-        save_dict = {"latents": latents}
-        if metadata:
-            save_dict["metadata"] = metadata
-
-        torch.save(save_dict, save_path)
 
 
 
@@ -146,6 +155,18 @@ def load_flow(cfg, model):
     raise ValueError(f"Unsupported flow class: {cfg.flow.type}")
 
 
+#TODO LOAD VAE PROCESSOR. SEE HOW THINGS NEED TO BE SCALED FOR TRAIN AND SAMPLING
+#TODO REVISIT DECODE_LATENT_IMAGE
+#TODO START TRAINING SOMETHING
+def load_vae_processor(cfg, device):
+    vae, processor = load_vae_and_processor(
+        repo_id=cfg.vae.repo_id,
+        subfolder=cfg.vae.subfolder,
+        device=device
+    )
+    return vae, processor
+
+
 @hydra.main(version_base=None, config_path="configs/flow_train", config_name="flow_train")
 def main(cfg: DictConfig):
     # Setup output directories
@@ -158,15 +179,17 @@ def main(cfg: DictConfig):
     # Datasets and DataLoaders
     train_ds = EchoDataset(cfg, split='train')
     val_ds = EchoDataset(cfg, split='val')
+    sample_ds = EchoDataset(cfg, split='sample', n_sample_videos=4)
 
     train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True)
     val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size)
+    sample_dl = DataLoader(sample_ds, batch_size=1, collate_fn=make_sampling_collate(n=4))
     data_shape = train_ds.shape # (T, C, H, W)
 
     # Load model and flow wrapper
     model = load_model(cfg, data_shape, device)
     model = load_flow(cfg, model)
-    model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir)
+    model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
 
     # Define callbacks and logger(s)
     ckpt_callback = ModelCheckpoint(

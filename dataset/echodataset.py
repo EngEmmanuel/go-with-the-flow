@@ -13,17 +13,31 @@ from torchvision.transforms.functional import InterpolationMode
 device = select_device()
 
 class EchoDataset(Dataset):
-    def __init__(self, cfg, split='train'):
+    def __init__(self, cfg, split='train', **kwargs):
         self.cfg = cfg
         self.device = device
         self.data_path = Path(cfg.dataset.path)
         self.df = pd.read_csv(self.data_path / 'metadata.csv')
-        self.df = self.df[self.df['split'].str.lower() == split].reset_index(drop=True)
+        self.split = split.lower()
+
+        # Filter dataframe based on split
+        if split == 'sample':
+            self.df = self.df[self.df['split'].str.lower() == 'val'].reset_index(drop=True)
+        else:
+            self.df = self.df[self.df['split'].str.lower() == split].reset_index(drop=True)
+
+        # Number of sample videos to use for train time monitoring
+        if kwargs.get('n_sample_videos', None) is not None:
+            n_sample_videos = kwargs['n_sample_videos']
+            self.df = self.df.sample(n=min(n_sample_videos, len(self.df))).reset_index(drop=True)
+
 
         self.shape = self.cfg.dataset.get('shape', None)
         if self.shape is None:
             stats = torch.load(self.data_path / f"{self.df.iloc[0]['video_name']}.pt", map_location='cpu')
             self.shape = (self.cfg.dataset.max_frames,) + stats['mu'].shape[1:]
+
+
         print(f"{split} Data Shape:", self.shape) # (T, C, H, W)
         print(f"{split} Dataset size: {len(self.df)}")
 
@@ -98,6 +112,12 @@ class EchoDataset(Dataset):
 
         return z, cond
 
+    def process_ef(self, ef, dtype=None):
+        ef = torch.tensor(ef, device=self.device, dtype=dtype)
+        ehs_dim = self.cfg.model.kwargs.get('cross_attention_dim', self.cfg.model.kwargs.get('caption_channels'))
+        encoder_hidden_states = ef.view(1, 1).expand(1, ehs_dim).to(self.device)
+        return encoder_hidden_states
+
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
 
@@ -111,8 +131,10 @@ class EchoDataset(Dataset):
         z = z.permute(1, 0, 2, 3).to(self.device)
         cond = cond.permute(1, 0, 2, 3).to(self.device)
 
-        ef = torch.tensor(row['EF_Area'], dtype=z.dtype, device=self.device)
-        ehs_dim = self.cfg.model.kwargs.get('cross_attention_dim', self.cfg.model.kwargs.get('caption_channels'))
-        encoder_hidden_states = ef.view(1, 1).expand(1, ehs_dim).to(self.device)
+        ef = row['EF_Area'] / 100.0  # Normalize EF to [0, 1]
+        encoder_hidden_states = self.process_ef(ef, dtype=z.dtype)
 
-        return {"x": z, "cond_image": cond, "encoder_hidden_states": encoder_hidden_states}
+        inputs = {"x": z, "cond_image": cond, "encoder_hidden_states": encoder_hidden_states}
+        if self.split == 'sample':
+            inputs['video_name'] = row['video_name']
+        return inputs
