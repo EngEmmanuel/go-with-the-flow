@@ -1,0 +1,42 @@
+defaults:
+  - model: unet
+  #- paths: ${oc.env:HOSTNAME}
+  #- __self__ # Last takes priority so any properties redefined here take precedence
+
+dataset:
+  path: data/CAMUS_Latents_4f8
+  max_frames: 32
+  batch_size: 4
+
+
+
+flow:
+  type: linear
+  kwargs:
+    clip_values: [-1, 1]
+
+trainer:
+  lr: 1e-4
+  kwargs:
+    max_epochs: 2
+    precision: 32
+    accelerator: auto
+    val_check_interval: 0.25
+    #profiler: simple
+
+
+
+wandb:
+  project: go-with-the-flow
+  entity: engemmanuel
+  group: ${flow.type}
+
+
+sample_every_n_val_steps: 1
+ckpt:
+  every_n_train_steps: 5000
+  save_last: True 
+
+hydra:
+  run:
+    dir: ./outputs/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

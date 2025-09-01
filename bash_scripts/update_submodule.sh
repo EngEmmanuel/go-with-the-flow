@@ -4,30 +4,39 @@ set -euo pipefail
 # Trap errors and report the last step
 trap 'echo "❌ Error during: ${STEP}"; exit 1' ERR
 
-SUBMODULE_PATH="rectified-flow-pytorch"
-COMMIT_MSG="chore: bump ${SUBMODULE_PATH} to upstream"
+# List of submodules to update
+SUBMODULES=("rectified-flow-pytorch" "stylegan-v")
 
 echo "🔄 Starting submodule update workflow…"
 
-# 1️⃣ Ensure .gitmodules is synced
-STEP="Syncing .gitmodules"
-git submodule sync "${SUBMODULE_PATH}"
+for SUBMODULE_PATH in "${SUBMODULES[@]}"; do
+  COMMIT_MSG="chore: bump ${SUBMODULE_PATH} to upstream"
 
-# 2️⃣ Fetch & fast-forward the tracked branch in one go
-STEP="Updating submodule via --remote"
-git submodule update --remote "${SUBMODULE_PATH}"
+  echo "📦 Processing submodule: ${SUBMODULE_PATH}"
 
-# 3️⃣ Stage the updated pointer
-STEP="Staging updated submodule pointer"
-git add "${SUBMODULE_PATH}"
+  # 1️⃣ Ensure .gitmodules is synced
+  STEP="Syncing .gitmodules for ${SUBMODULE_PATH}"
+  git submodule sync "${SUBMODULE_PATH}"
 
-# 4️⃣ Commit if there’s any change
-STEP="Committing pointer bump"
-if git diff --cached --quiet; then
-  echo "ℹ️  No pointer changes to commit."
-else
-  git commit -m "${COMMIT_MSG}"
-  echo "✅  Committed: ${COMMIT_MSG}"
-fi
+  # 2️⃣ Fetch & fast-forward the tracked branch in one go
+  STEP="Updating ${SUBMODULE_PATH} via --remote"
+  git submodule update --remote "${SUBMODULE_PATH}"
 
-echo "🎉  Submodule update complete!"
+  # 3️⃣ Stage the updated pointer
+  STEP="Staging updated pointer for ${SUBMODULE_PATH}"
+  git add "${SUBMODULE_PATH}"
+
+  # 4️⃣ Commit if there’s any change
+  STEP="Committing pointer bump for ${SUBMODULE_PATH}"
+  if git diff --cached --quiet "${SUBMODULE_PATH}"; then
+    echo "ℹ️  No pointer changes to commit for ${SUBMODULE_PATH}."
+  else
+    git commit -m "${COMMIT_MSG}"
+    echo "✅  Committed: ${COMMIT_MSG}"
+  fi
+
+  echo "✅ Finished ${SUBMODULE_PATH}"
+  echo "-----------------------------------"
+done
+
+echo "🎉  All submodules updated successfully!"

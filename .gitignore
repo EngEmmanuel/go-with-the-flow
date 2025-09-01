@@ -4,7 +4,8 @@ outputs/
 .vscode/
 .cache/
 wandb/
-data/CAMUS_Processed
+data/CAMUS_*
+store/
 
 *DS_Store
 
