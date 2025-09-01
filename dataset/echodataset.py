@@ -23,8 +23,9 @@ class EchoDataset(Dataset):
         self.shape = self.cfg.dataset.get('shape', None)
         if self.shape is None:
             stats = torch.load(self.data_path / f"{self.df.iloc[0]['video_name']}.pt", map_location='cpu')
-            self.shape = stats['mu'].shape
-        print("Data Shape:", self.shape) # (T, C, H, W)
+            self.shape = (self.cfg.dataset.max_frames,) + stats['mu'].shape[1:]
+        print(f"{split} Data Shape:", self.shape) # (T, C, H, W)
+        print(f"{split} Dataset size: {len(self.df)}")
 
 
     def __len__(self):
@@ -59,7 +60,7 @@ class EchoDataset(Dataset):
             indices = torch.linspace(0, T - 1, target_length)
             indices = torch.round(indices).to(torch.int64)
             resampled_frames = frames[indices]
-            pad_mask = torch.zeros_like((target_length, 1, *data_shape[1:]), dtype=frames.dtype)
+            pad_mask = torch.zeros((target_length, 1, *data_shape[1:]), dtype=frames.dtype)
 
         return resampled_frames, pad_mask
 
@@ -89,12 +90,11 @@ class EchoDataset(Dataset):
         #z.shape == z_masked.shape = (t, C, H, W)
         # downsample or pad up to T frames
         resampled, pad_mask = self.resample_sequence(
-            torch.cat([z, z_masked, observed_mask], dim=1),
+            torch.cat([z, z_masked], dim=1),
             target_length=self.cfg.dataset.max_frames
         )
 
         z, cond = resampled[:,:self.shape[1],...], resampled[:,self.shape[1]:,...]
-        cond = torch.cat([cond, pad_mask], dim=1)
 
         return z, cond
 
@@ -108,10 +108,10 @@ class EchoDataset(Dataset):
         z = mu + var.sqrt() * eps
         z, cond = self.transform(z)
 
-        z = z.to(self.device)
-        cond = cond.to(self.device)
+        z = z.permute(1, 0, 2, 3).to(self.device)
+        cond = cond.permute(1, 0, 2, 3).to(self.device)
 
-        ef = torch.tensor(row['EF_Area'], device=self.device)
+        ef = torch.tensor(row['EF_Area'], dtype=z.dtype, device=self.device)
         ehs_dim = self.cfg.model.kwargs.get('cross_attention_dim', self.cfg.model.kwargs.get('caption_channels'))
         encoder_hidden_states = ef.view(1, 1).expand(1, ehs_dim).to(self.device)
 

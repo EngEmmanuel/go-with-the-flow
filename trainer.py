@@ -52,16 +52,16 @@ class FlowVideoGenerator(LightningModule):
 
     def training_step(self, batch, batch_idx):
         loss = self.model(**batch)
-        self.log('train_loss', loss)
+        self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
         loss = self.model(**batch)
-        self.log('val_loss', loss)
+        self.log('val_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        if self.sample_dir is None:
+        if self.sample_dir is None or batch_idx != 0:
             return
         
         # Increment counter
@@ -69,14 +69,21 @@ class FlowVideoGenerator(LightningModule):
 
         if self._val_counter % self.cfg.sample_every_n_val_steps == 0:
             # Use this batch for sampling
+            self.print(f"Sampling at step {self.global_step}")
             batch.pop('x')
-            self.sample_from_batch(**batch)
+            self.sample_from_batch(batch)
 
     def sample_from_batch(self, batch):
+        #TODO Currently only tests reconstruction. Needs to be updated to test generation
+        save_path = self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"
+
+        batch_size, *_ = batch['cond_image'].shape
         self.model.eval()
         with torch.no_grad():
-            sampled_videos = self.model.sample(**batch)
-            self.save_latent_videos(sampled_videos, self.sample_dir / f"sampled_videos_step_{self.global_step}.pt")
+            sampled_videos = self.model.sample(**batch, batch_size=batch_size)
+            self.save_latent_videos(sampled_videos, save_path)
+
+        self.print(f"Sampled videos saved to: {save_path}")
         self.model.train()
 
     def configure_optimizers(self):
@@ -92,9 +99,6 @@ class FlowVideoGenerator(LightningModule):
             save_path (str): File path to save the tensor.
             metadata (dict, optional): Additional info to save with latents.
         """
-        save_path = Path(save_path)
-        save_path.parent.mkdir(parents=False, exist_ok=False)
-
         # Create a dictionary to store
         save_dict = {"latents": latents}
         if metadata:
@@ -115,7 +119,7 @@ def load_model(cfg, data_shape, device):
         case "unet":
             return UNetSTIC(
                 sample_size=W, # (T, C, H, W)
-                in_channels=C + C + 2, # model expects concatenated x and cond_image along channels
+                in_channels=C + C, # model expects concatenated x and cond_image along channels
                 out_channels=C,
                 num_frames=T,
                 **cfg.model.kwargs
@@ -123,7 +127,7 @@ def load_model(cfg, data_shape, device):
         case "transformer":
             return DiffuserSTDiT(
                 input_size=(T, H, W),
-                in_channels=C + C + 2,
+                in_channels=C + C,
                 out_channels=C,
                 **cfg.model.kwargs
             ).to(device)
@@ -146,8 +150,10 @@ def load_flow(cfg, model):
 def main(cfg: DictConfig):
     # Setup output directories
     output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
-    ckpt_dir = (output_dir / "checkpoints").mkdir(parents=True, exist_ok=True)
-    sample_dir = (output_dir / "sample_videos").mkdir(parents=True, exist_ok=True)
+    ckpt_dir = (output_dir / "checkpoints")
+    sample_dir = (output_dir / "sample_videos")
+    ckpt_dir.mkdir(parents=True, exist_ok=True)
+    sample_dir.mkdir(parents=True, exist_ok=True)
 
     # Datasets and DataLoaders
     train_ds = EchoDataset(cfg, split='train')
@@ -165,12 +171,15 @@ def main(cfg: DictConfig):
     # Define callbacks and logger(s)
     ckpt_callback = ModelCheckpoint(
         dirpath=ckpt_dir,
-        filename='ckpt-e{epoch}-s{step}'
+
+        filename='ckpt-{epoch}-{step}',
+        **cfg.ckpt
     )
     lr_callback = LearningRateMonitor(logging_interval='step')
 
     logger = WandbLogger(
-        **cfg.wandb
+        **cfg.wandb,
+        config=OmegaConf.to_container(cfg, resolve=True)
     )
 
     # Instantiate trainer
