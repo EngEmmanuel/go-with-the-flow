@@ -1,10 +1,10 @@
 defaults:
   - model: unet
-  #- paths: ${oc.env:HOSTNAME}
+  - paths: mac # Simply override in cli call
   #- __self__ # Last takes priority so any properties redefined here take precedence
 
 dataset:
-  path: data/CAMUS_Latents_${vae.resolution}
+  path: ${data_path}/CAMUS_Latents_${vae.resolution}
   max_frames: 32
   batch_size: 4
 
@@ -12,6 +12,7 @@ flow:
   type: linear
   kwargs:
     clip_values: [-1, 1]
+    clip_flow_values: [-10, 10]
 
 vae:
   resolution: 4f8
@@ -46,4 +47,4 @@ wandb:
 
 hydra:
   run:
-    dir: ./outputs/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${train_output_path}/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}
