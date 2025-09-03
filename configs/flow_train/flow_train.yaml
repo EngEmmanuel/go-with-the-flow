@@ -10,12 +10,12 @@ dataset:
 
 flow:
   type: linear
-  kwargs:
-    clip_values: [-1, 1]
-    clip_flow_values: [-10, 10]
+  #kwargs:
+  #  clip_values: [-10, 10]
+  #  clip_flow_values: [-10, 10]
 
 vae:
-  resolution: 4f8
+  resolution: 4f4
   scaling_factors:
     4f4: 0.1080
     4f8: 0.2232

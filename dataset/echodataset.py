@@ -78,13 +78,13 @@ class EchoDataset(Dataset):
 
         return resampled_frames, pad_mask
 
-    def mask_random_frames(self, video: torch.Tensor):
+    def mask_random_frames(self, video: torch.Tensor, dist='uniform'):
         '''
-        Masks 'n_missing_frames' in the range [0, t) of the input video tensor.
+        Masks 'n_missing_frames' in the range [0, T) of the input video tensor.
         '''
         T = video.shape[0]
 
-        n_missing_frames = torch.randint(low=1, high=T, size=(1,)).item() #[1,t)i.e., Upper bound not inclusive therefore t-1 is max
+        n_missing_frames = self.missing_frame_distribution(T, dist=dist)
         mask_indices = random.sample(range(T), n_missing_frames)
 
         mask = torch.ones_like(video)
@@ -95,7 +95,20 @@ class EchoDataset(Dataset):
         observed_mask = mask[:,0:1,...]
         return masked_video, observed_mask
 
+    def missing_frame_distribution(self, T, dist):
+        '''
+        Returns the number of frames to remove based on the specified distribution.
+        '''
+        min_frames_removed = 1
+        max_frames_removed = T - 1
+        match dist:
+            case 'uniform':
+                val = np.random.randint(1, T)
+            case 'geometric':
+                p = 8/T
+                val = T - np.random.geometric(p)
 
+        return np.clip(val, min_frames_removed, max_frames_removed, dtype=int)
 
     def transform(self, z: torch.Tensor):
         # randomly mask frames
