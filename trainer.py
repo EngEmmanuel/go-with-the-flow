@@ -12,6 +12,7 @@ from typing import Literal, Callable
 from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
+#from pytorch_lightning.callbacks.weight_averaging import WeightAveraging
 import wandb # type: ignore
 import sklearn.metrics
 
@@ -100,7 +101,7 @@ class FlowVideoGenerator(LightningModule):
             ef_values = reference_batch['ef_values']
             reference_batch['cond_image'] /= self.cfg.vae.scaling_factor
             sampled_videos /= self.cfg.vae.scaling_factor
-            
+
             sample_results[n] = {
                 "video_name": reference_batch['video_name'],
                 "cond_image": reference_batch['cond_image'],
@@ -195,8 +196,7 @@ def main(cfg: DictConfig):
     # Define callbacks and logger(s)
     ckpt_callback = ModelCheckpoint(
         dirpath=ckpt_dir,
-
-        filename='ckpt-{epoch}-{step}',
+        filename='{epoch}-{step}',
         **cfg.ckpt
     )
     lr_callback = LearningRateMonitor(logging_interval='step')

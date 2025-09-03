@@ -28,7 +28,8 @@ class LinearFlow(Module):
             self,
             model,
             data_shape: tuple[int, ...] | None = None,
-            clip_values: tuple[float, float] = (-1., 1.),
+            clip_values: tuple[float, float] | None = None,
+            clip_flow_values: tuple[float, float] | None = None,
             **kwargs
     ):
         super().__init__()
@@ -36,10 +37,11 @@ class LinearFlow(Module):
 
         self.data_shape = data_shape
         self.noise_schedule = lambda x: x
-        self.clip_values = clip_values #TODO Implement clipping
+        self.clip_values = clip_values
+        self.clip_flow_values = clip_flow_values
 
         self.loss_fn = nn.MSELoss()
-        # objective - either flow or noise
+        # objective - either flow or noise. CHOSE TO PREDICT FLOW
         # self.predict = predict
 
     @property
@@ -70,12 +72,21 @@ class LinearFlow(Module):
 
         data_shape = default(data_shape, self.data_shape)
 
+        maybe_clip = (lambda t: t.clamp_(*self.clip_values)) if self.clip_values is not None else identity
+        maybe_clip_flow = (lambda t: t.clamp_(*self.clip_flow_values)) if self.clip_flow_values is not None else identity
+
         model = self.model
 
         def ode_fn(t, x):
              #TODO Clip flow values
+            x = maybe_clip(x)
+
             output = self.predict_flow(model, x, times=t, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, mask=mask, **model_kwargs)
-            return output
+
+            flow = output
+            flow = maybe_clip_flow(flow)
+
+            return flow
 
         # Start with random gaussian noise - y0
         noise = default(noise, torch.randn(batch_size, *data_shape, device=self.device))

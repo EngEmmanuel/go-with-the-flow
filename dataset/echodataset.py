@@ -135,6 +135,6 @@ class EchoDataset(Dataset):
         encoder_hidden_states = self.process_ef(ef, dtype=z.dtype)
 
         inputs = {"x": z, "cond_image": cond, "encoder_hidden_states": encoder_hidden_states}
-        if self.split == 'sample':
+        if self.split in ['sample', 'test']:
             inputs['video_name'] = row['video_name']
         return inputs

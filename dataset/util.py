@@ -1,7 +1,7 @@
 import torch 
 
 
-def make_sampling_collate(n: int, *kwargs):
+def make_sampling_collate(n: int, **kwargs):
     def _collate(batch):
         '''
         Returns a batch of size n by repeating the single example in the input batch.
