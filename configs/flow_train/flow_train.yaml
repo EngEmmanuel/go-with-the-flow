@@ -1,0 +1,49 @@
+defaults:
+  - model: unet
+  #- paths: ${oc.env:HOSTNAME}
+  #- __self__ # Last takes priority so any properties redefined here take precedence
+
+dataset:
+  path: data/CAMUS_Latents_${vae.resolution}
+  max_frames: 32
+  batch_size: 4
+
+flow:
+  type: linear
+  kwargs:
+    clip_values: [-1, 1]
+
+vae:
+  resolution: 4f8
+  scaling_factors:
+    4f4: 0.1080
+    4f8: 0.2232
+  scaling_factor: ${vae.scaling_factors.${vae.resolution}}
+
+trainer:
+  lr: 1e-4
+  kwargs:
+    max_epochs: 2
+    precision: 32
+    accelerator: auto
+    val_check_interval: 0.1
+    #profiler: simple
+
+
+sample_every_n_val_steps: 2
+ckpt:
+  every_n_train_steps: 10
+  save_last: True
+  monitor: "val_loss"
+  mode: min
+  save_top_k: 4
+  
+wandb:
+  project: go-with-the-flow
+  entity: engemmanuel
+  group: ${flow.type}
+  #mode: offline
+
+hydra:
+  run:
+    dir: ./outputs/hydra_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -2,3 +2,6 @@
 	path = rectified-flow-pytorch
 	url = https://github.com/lucidrains/rectified-flow-pytorch.git
 	branch = main
+[submodule "stylegan-v"]
+	path = stylegan-v
+	url = https://github.com/universome/stylegan-v.git
