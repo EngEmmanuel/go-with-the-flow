@@ -7,6 +7,7 @@ cluster_outputs/
 wandb/
 data/CAMUS_*
 store/
+slurms/
 
 *DS_Store
 
