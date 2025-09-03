@@ -124,8 +124,8 @@ class EchoDataset(Dataset):
         stats = torch.load(self.data_path / f"{row['video_name']}.pt")
         mu, var = stats['mu'], stats['var'] #(T, C, H, W)
 
-        eps = torch.randn_like(mu)
-        z = mu + var.sqrt() * eps
+        eps = torch.randn_like(mu) if self.split != 'val' else torch.zeros_like(mu)
+        z = (mu + var.sqrt() * eps) * self.cfg.vae.scaling_factor
         z, cond = self.transform(z)
 
         z = z.permute(1, 0, 2, 3).to(self.device)

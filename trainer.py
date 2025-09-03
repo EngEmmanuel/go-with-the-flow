@@ -96,7 +96,11 @@ class FlowVideoGenerator(LightningModule):
 
             with torch.no_grad():
                 sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
+
             ef_values = reference_batch['ef_values']
+            reference_batch['cond_image'] /= self.cfg.vae.scaling_factor
+            sampled_videos /= self.cfg.vae.scaling_factor
+            
             sample_results[n] = {
                 "video_name": reference_batch['video_name'],
                 "cond_image": reference_batch['cond_image'],
@@ -116,9 +120,6 @@ class FlowVideoGenerator(LightningModule):
 
 
 
-
-    #TODO Add some sort of sample step?
-#TODO Complete me. Simple is best. Just see if things run. Use dummy tensors
 
 
 def load_model(cfg, data_shape, device):
@@ -271,14 +272,6 @@ if __name__ == '__main__':
 
         batch.pop('x')
         latent_sample = model.sample(**batch, batch_size=B)
-
-
-
-
-
-
-
-
 
 
 

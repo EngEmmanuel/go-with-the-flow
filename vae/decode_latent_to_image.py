@@ -271,7 +271,7 @@ if __name__ == "__main__":
     vae_res = '4f8'
 
     decode_directory(
-        directory_path="outputs/hydra_outputs/2025-09-01/19-25-05/sample_videos",
+        directory_path="outputs/hydra_outputs/2025-09-02/16-54-08/sample_videos",
         vae_locator="HReynaud/EchoFlow",
         subfolder=f"vae/avae-{vae_res}",
         device=device,
