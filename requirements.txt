@@ -3,7 +3,7 @@
 # torch
 # torchvision
 # Local editable install
--e ./rectified-flow-pytorch
+#-e ./rectified-flow-pytorch
 
 
 # Other dependencies

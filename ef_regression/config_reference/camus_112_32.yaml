@@ -1,10 +1,12 @@
-seed: 42
+seed: 23
+
+project_path: /users/spet4299/code/TEE/flow-matching/go-with-the-flow
 
 dataset:
-  data_path: "./data/CAMUS_Processed"
+  data_path: ${project_path}/data/CAMUS_Processed
   metadata_csv: "camus_ef_results.csv"
   deactivate_cache: True
-  image_size: 48 #112
+  image_size: 224
   channels: 3
   target_frames: 32
   preload_data: False
@@ -13,16 +15,23 @@ dataset:
 
 
 dataloader:
-  batch_size: 2 #16
+  batch_size: 7
   num_workers: 32
 
 trainer:
   max_epochs: 100
-  lr: 1e-4
+  lr: 1e-5
+  fc_lr: 1e-3
+  weight_decay: 1e-4
+  accelerator: auto
+  precision: 32
+  strategy: ddp
+  accumulate_grad_batches: 2
 
 wandb:
   project: "ef_regression"
   entity: "engemmanuel"
 
 checkpoint:
-  path: "./outputs/ef_regression"
+  path: ${project_path}/outputs/ef_regression
+  

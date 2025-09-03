@@ -1,6 +1,7 @@
 notes/
 experiments/
 outputs/
+cluster_outputs/
 .vscode/
 .cache/
 wandb/
