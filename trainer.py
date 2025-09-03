@@ -76,7 +76,8 @@ class FlowVideoGenerator(LightningModule):
         if self.sample_dir is None or batch_idx != 0:
             return
 
-        if self._val_counter % self.cfg.sample_every_n_val_steps == 0:
+        is_sample_step = (self._val_counter % self.cfg.sample_every_n_val_steps == 0)
+        if self.trainer.is_global_zero and is_sample_step:
             # Use this batch for sampling
             self.print(f"Sampling at step {self.global_step}")
             #batch.pop('x')
@@ -89,6 +90,7 @@ class FlowVideoGenerator(LightningModule):
 
 
     def sample(self, n_videos_per_sample=2):
+
         self.model.eval()
         sample_results = {}
         for n in range(n_videos_per_sample):
@@ -194,22 +196,22 @@ def main(cfg: DictConfig):
     model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
 
     # Define callbacks and logger(s)
-    ckpt_callback = ModelCheckpoint(
-        dirpath=ckpt_dir,
-        filename='{epoch}-{step}',
-        **cfg.ckpt
-    )
-    lr_callback = LearningRateMonitor(logging_interval='step')
+    callbacks_list = []
+    for _,v in OmegaConf.to_container(cfg.ckpt, resolve=True).items():
+        if isinstance(v, dict):
+            callbacks_list.append(ModelCheckpoint(**v, dirpath=ckpt_dir))
+
+    callbacks_list.append(LearningRateMonitor(logging_interval='step'))
 
     logger = WandbLogger(
         **cfg.wandb,
         config=OmegaConf.to_container(cfg, resolve=True)
     )
 
-    # Instantiate trainer
+    # Instantiate trainers
     trainer = Trainer(
         logger=logger,
-        callbacks=[ckpt_callback, lr_callback],
+        callbacks=callbacks_list,
         **cfg.trainer.kwargs
     )
 
@@ -218,60 +220,8 @@ def main(cfg: DictConfig):
 
 if __name__ == '__main__':
     device = select_device()
-
     main()
 
-
-
-
-
-    if False:
-        arch = 'unet'
-        # Mock data
-        B, T, C, H, W = 2, 32, 4, 28, 28
-        cross_attention_dim = 2
-        train_ds = FlowTestDataset(B=B, T=T, C=C, H=H, W=W, device=device, cross_attention_dim=cross_attention_dim)
-        val_ds = FlowTestDataset(B=B, T=T, C=C, H=H, W=W, device=device, cross_attention_dim=cross_attention_dim)
-        train_dl = DataLoader(train_ds, batch_size=B)
-        val_dl = DataLoader(val_ds, batch_size=B)
-
-        if arch == "unet":
-            model = UNetSTIC(
-                sample_size=H, #H,W of latent frame
-                in_channels=C+C+2, # model expects concatenated x and cond_image along channels; use 2*C for test
-                out_channels=C, 
-                num_frames=T,
-                down_block_types = (
-                    "CrossAttnDownBlockSpatioTemporal",
-                    "DownBlockSpatioTemporal"
-                ),
-                up_block_types = (
-                    "UpBlockSpatioTemporal",
-                    "CrossAttnUpBlockSpatioTemporal"
-                ),
-                block_out_channels=[32, 64],
-                num_attention_heads=(2, 4),
-                cross_attention_dim=cross_attention_dim
-            ).to(device)
-        else:
-            model = DiffuserSTDiT(
-                input_size=(T, H, W),
-                in_channels=C+C+2,
-                out_channels=C,
-                patch_size=(1, 2, 2),
-                num_heads=8,
-                caption_channels=cross_attention_dim,
-                model_max_length=1
-            ).to(device)
-        model = LinearFlow(model=model)
-
-        # Perform a simple forward through the wrapper to get the model output
-        batch = next(iter(train_dl))
-        out = model(**batch)
-        print('out shape:', out.shape)
-
-        batch.pop('x')
-        latent_sample = model.sample(**batch, batch_size=B)
 
 
 
