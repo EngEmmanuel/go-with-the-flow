@@ -120,6 +120,8 @@ class EchoDataset(Dataset):
             return self._cache[video_name]
 
         stats = torch.load(self.data_path / f"{video_name}.pt", map_location='cpu')
+        if 'std' not in stats:
+            stats['std'] = stats['var'].sqrt()
         if self.cache:
             self._cache[video_name] = stats
         return stats
@@ -128,10 +130,10 @@ class EchoDataset(Dataset):
         row = self.df.iloc[idx]
 
         stats = self._load_video(row['video_name'])
-        mu, var = stats['mu'], stats['var']  # (T, C, H, W)
+        mu, std = stats['mu'], stats['std']  # (T, C, H, W)
 
         eps = torch.randn_like(mu) if self.split != 'val' else torch.zeros_like(mu)
-        z = (mu + var.sqrt() * eps) * self.cfg.vae.scaling_factor
+        z = (mu + std * eps) * self.cfg.vae.scaling_factor
         z, cond = self.transform(z)
 
         # Rearrange to (C, T, H, W), stay on CPU, ensure contiguous
