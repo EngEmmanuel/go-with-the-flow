@@ -97,6 +97,7 @@ class FlowVideoGenerator(LightningModule):
             reference_batch, repeated_batch = next(self.sample_dl)
             batch_size, *_ = repeated_batch['cond_image'].shape
 
+            repeated_batch = {k: v.to(self.device) for k, v in repeated_batch.items()}
             with torch.no_grad():
                 sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
 
@@ -185,8 +186,8 @@ def main(cfg: DictConfig):
     val_ds = EchoDataset(cfg, split='val')
     sample_ds = EchoDataset(cfg, split='sample', n_sample_videos=4)
 
-    train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True)
-    val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size)
+    train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
+    val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size, num_workers=4, pin_memory=True, persistent_workers=True)
     sample_dl = DataLoader(sample_ds, batch_size=1, collate_fn=make_sampling_collate(n=4))
     data_shape = train_ds.shape # (T, C, H, W)
 
