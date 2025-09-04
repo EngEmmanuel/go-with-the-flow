@@ -14,7 +14,7 @@ class RegressionModel(nn.Module):
         self.config = config
         self.model = r2plus1d_18(weights=R2Plus1D_18_Weights.KINETICS400_V1)
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, 1)
-        self.model.fc.bias.data[0] = 36.7 # EF_Area mean: 36.7%
+        self.model.fc.bias.data[0] = 0.367 # EF_Area mean: 36.7%
 
     def forward(self, x):
         return self.model(x)
@@ -36,8 +36,8 @@ class EFRegressor(LightningModule):
     def configure_optimizers(self):
         opt = optim.Adam(
             [
-                {'params': self.model.model.parameters(), 'lr': self.config.trainer.lr},       # Backbone
-                {'params': self.model.model.fc.parameters(), 'lr': self.config.trainer.fc_lr}     # Head
+                {'params': self.model.model.fc.parameters(), 'lr': self.config.trainer.lr},       # Backbone
+                {'params': (p for n, p in self.model.model.named_parameters() if not n.startswith("fc")), 'lr': self.config.trainer.fc_lr}     # Head
             ],
             weight_decay=self.config.trainer.weight_decay
         )

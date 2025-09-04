@@ -1,0 +1,9 @@
+type: transformer
+kwargs:
+  patch_size: [1, 2, 2]
+  num_heads: 6
+  depth: 12
+  hidden_size: 284
+  mlp_ratio: 4.0
+  caption_channels: 1
+  model_max_length: 1

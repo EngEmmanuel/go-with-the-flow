@@ -155,16 +155,13 @@ class CAMUSVideoEF(Dataset):
             train_transforms = [
                 v2.Lambda(lambda x: x/255.0),  # Scale to [0, 1]
                 # Mild geometric augmentation — random shift & scale
-                v2.RandomResizedCrop(
-                    size=(self.image_size, self.image_size),
-                    scale=(0.9, 1.0),  # keep most of image
-                    ratio=(1.0, 1.0),  # keep aspect ratio square
-                    interpolation=v2.InterpolationMode.BILINEAR
-                ),
+                v2.Resize((self.image_size, self.image_size), interpolation=v2.InterpolationMode.BILINEAR),
+                v2.Pad(16),  # or 'constant'
+                v2.RandomCrop((self.image_size, self.image_size)),
                 v2.Normalize(mean=[cfg.data_mean] * self.channels,
                             std=[cfg.data_std] * self.channels) # assumes grayscale so cfg.data_x will be one element
             ]
-            val_transforms =[
+            val_transforms = [
                 v2.Lambda(lambda x: x / 255.0),  # Scale to [0, 1]
                 v2.Resize(
                     [self.image_size] * 2,
@@ -175,7 +172,7 @@ class CAMUSVideoEF(Dataset):
                     std=[cfg.data_std] * self.channels
                 )
             ]
-            self.transform = v2.Compose(train_transforms if "VAL" not in splits else val_transforms)
+            self.transform = v2.Compose(train_transforms if "TRAIN" in splits else val_transforms)
 
         # Preload data if requested
         if self.preload_data:
@@ -271,8 +268,6 @@ class CAMUSVideoEF(Dataset):
 
         seq_tensor = seq_tensor.permute(1, 0, 2, 3)  # Change to (C, T, H, W) format
         ef_tensor = torch.tensor(ef, dtype=torch.float32)
-
-        
 
         return seq_tensor, ef_tensor
 

@@ -11,7 +11,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers.wandb import WandbLogger
 
 
-sys.path.append('/Users/emmanuel/Documents/DPhil/code/TEE/go-with-the-flow')
+sys.path.append('/users/spet4299/code/TEE/flow-matching/go-with-the-flow')
 
 from ef_regression.dataset import CAMUSVideoEF #type: ignore
 from ef_regression.model import EFRegressor #type: ignore
@@ -20,7 +20,7 @@ from ef_regression.model import EFRegressor #type: ignore
 if __name__ == "__main__":
     DEFAULT_CONFIG_PATH = "ef_regression/config_reference/camus_112_32.yaml"
 
-    torch.hub.set_dir(".cache")
+    torch.hub.set_dir("/users/spet4299/code/TEE/flow-matching/go-with-the-flow/.cache")
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--config", type=str, required=(DEFAULT_CONFIG_PATH is None),
@@ -77,8 +77,10 @@ if __name__ == "__main__":
         max_epochs=config.trainer.max_epochs,
         callbacks=[checkpoint_callback, lr_monitor],
         logger=logger,
-        accelerator="auto", 
-        precision=32
+        accelerator=config.trainer.accelerator, 
+        precision=config.trainer.precision,
+        strategy=config.trainer.strategy,
+        accumulate_grad_batches= config.trainer.accumulate_grad_batches
     )
 
     trainer.fit(model, train_dl, val_dl)
