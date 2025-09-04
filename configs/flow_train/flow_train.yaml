@@ -1,18 +1,18 @@
 defaults:
   - _self_ # First takes priority so any properties redefined here take precedence
-  - model: unet
+  - model: hr_unet
   - paths: mac # Simply override in cli call
 
 dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
   max_frames: 32
-  batch_size: 4
+  batch_size: 5
 
 flow:
   type: linear
-  #kwargs:
-  #  clip_values: [-10, 10]
-  #  clip_flow_values: [-10, 10]
+  kwargs:
+    clip_values: [-.inf, .inf]
+    clip_flow_values: [-.inf, .inf]
 
 vae:
   resolution: 4f4
@@ -24,14 +24,15 @@ vae:
 trainer:
   lr: 1e-4
   kwargs:
-    max_epochs: 2
+    max_epochs: 1000
+    val_check_interval: 0.1
     precision: 32
     accelerator: auto
-    val_check_interval: 0.1
+    accumulate_grad_batches: 1
     #profiler: simple
 
 
-sample_every_n_val_steps: 2
+sample_every_n_val_steps: 400
 ckpt:
   metric:
     monitor: val_loss
