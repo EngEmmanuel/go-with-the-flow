@@ -35,7 +35,7 @@ class EchoDataset(Dataset):
         # Get shape
         self.shape = self.cfg.dataset.get('shape', None)
         if self.shape is None:
-            stats = torch.load(self.data_path / f"{self.df.iloc[0]['video_name']}.pt", map_location='cpu')
+            stats = torch.load(self.data_path / f"{self.df.iloc[0]['video_name']}.pt")#, map_location='cpu')
             self.shape = (self.cfg.dataset.max_frames,) + stats['mu'].shape[1:]
 
         print(f"{split} Data Shape: {self.shape}")  # (T, C, H, W)
@@ -106,7 +106,20 @@ class EchoDataset(Dataset):
             target_length=self.cfg.dataset.max_frames
         )
         z, cond = resampled[:, :self.shape[1], ...], resampled[:, self.shape[1]:, ...]
-        return z, cond
+        outputs = {"z": z, "cond": cond}
+
+        # Mask for where to compute the loss
+        match self.cfg.trainer.get('loss_mask'):
+            case None:
+                pass
+            case 'pad_and_observed': # Generation only. Ignores all frames that are present in the input AND condition.
+                observed_mask = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
+                #(T,C,H,W) -> (T,)
+                outputs["loss_mask"] = observed_mask[..., 0, 0, 0]
+            case 'pad': # Generation and Reconstruction. Ignores padded frames. Model has to learn to reconstruct seen frames
+                outputs["loss_mask"] = 1. - pad_mask[..., 0, 0, 0]
+
+        return outputs
 
     def process_ef(self, ef, dtype=None):
         ef = torch.tensor(ef, dtype=dtype)  # stay on CPU
@@ -119,9 +132,10 @@ class EchoDataset(Dataset):
         if self.cache and video_name in self._cache:
             return self._cache[video_name]
 
-        stats = torch.load(self.data_path / f"{video_name}.pt", map_location='cpu')
+        stats = torch.load(self.data_path / f"{video_name}.pt")
         if 'std' not in stats:
             stats['std'] = stats['var'].sqrt()
+            stats.pop('var', None)
         if self.cache:
             self._cache[video_name] = stats
         return stats
@@ -134,11 +148,11 @@ class EchoDataset(Dataset):
 
         eps = torch.randn_like(mu) if self.split != 'val' else torch.zeros_like(mu)
         z = (mu + std * eps) * self.cfg.vae.scaling_factor
-        z, cond = self.transform(z)
+        transformed_dict = self.transform(z)
 
         # Rearrange to (C, T, H, W), stay on CPU, ensure contiguous
-        z = z.permute(1, 0, 2, 3).contiguous()
-        cond = cond.permute(1, 0, 2, 3).contiguous()
+        z = transformed_dict["z"].permute(1, 0, 2, 3).contiguous()
+        cond = transformed_dict["cond"].permute(1, 0, 2, 3).contiguous()
 
         ef = row['EF_Area'] / 100.0
         encoder_hidden_states = self.process_ef(ef, dtype=z.dtype)
@@ -148,6 +162,11 @@ class EchoDataset(Dataset):
             "cond_image": cond,
             "encoder_hidden_states": encoder_hidden_states
         }
+
+        # Potential additions
+        if "loss_mask" in transformed_dict:
+            inputs["loss_mask"] = transformed_dict["loss_mask"].contiguous()
+
         if self.split in ['sample', 'test']:
             inputs['video_name'] = row['video_name']
 
