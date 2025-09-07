@@ -78,41 +78,39 @@ class FlowVideoGenerator(LightningModule):
 
         is_sample_step = (self._val_counter % self.cfg.sample_every_n_val_steps == 0)
         if self.trainer.is_global_zero and is_sample_step:
-            # Use this batch for sampling
             self.print(f"Sampling at step {self.global_step}")
-            #batch.pop('x')
-            #self.sample_from_batch(batch)
 
             self.sample()
 
         # Increment counter
         self._val_counter += 1
 
-
+    @torch.no_grad()
     def sample(self, n_videos_per_sample=2):
 
         self.model.eval()
         sample_results = {}
+
         for n in range(n_videos_per_sample):
             reference_batch, repeated_batch = next(self.sample_dl)
             batch_size, *_ = repeated_batch['cond_image'].shape
 
             repeated_batch = {k: v.to(self.device) for k, v in repeated_batch.items()}
-            with torch.no_grad():
-                sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
 
-            ef_values = reference_batch['ef_values']
-            reference_batch['cond_image'] /= self.cfg.vae.scaling_factor
+            sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
+            sampled_videos = sampled_videos.detach().cpu()
             sampled_videos /= self.cfg.vae.scaling_factor
+
+            cond_image = reference_batch['cond_image'] / self.cfg.vae.scaling_factor
+            ef_values = reference_batch['ef_values']
 
             sample_results[n] = {
                 "video_name": reference_batch['video_name'],
-                "cond_image": reference_batch['cond_image'],
-                'reconstructed': (sampled_videos[0,...], round(ef_values[0].item(), 3)),
-                'generated': (sampled_videos[1:,...], [round(x.item(), 3) for x in ef_values[1:]])
+                "cond_image": cond_image.contiguous(),
+                'reconstructed': (sampled_videos[0,...].contiguous(), round(ef_values[0].item(), 3)),
+                'generated': (sampled_videos[1:,...].contiguous(), [round(x.item(), 3) for x in ef_values[1:]])
             }
 
-            # TODO Check if data is unnormalized somewhere here when sampling
         torch.save(
             sample_results, 
             self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"

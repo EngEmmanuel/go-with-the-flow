@@ -4,7 +4,7 @@ from torch.nn import Module
 from torch import Tensor
 from torchdiffeq import odeint
 from einops import rearrange, repeat
-
+from src.custom_loss import MaskedMSELoss
 # Code adapted from https://github.com/lucidrains/rectified-flow-pytorch/blob/main/rectified_flow_pytorch/rectified_flow.py
 
 def identity(t):
@@ -40,7 +40,7 @@ class LinearFlow(Module):
         self.clip_values = clip_values
         self.clip_flow_values = clip_flow_values
 
-        self.loss_fn = nn.MSELoss()
+        self.loss_fn = MaskedMSELoss()
         # objective - either flow or noise. CHOSE TO PREDICT FLOW
         # self.predict = predict
 
@@ -136,7 +136,8 @@ class LinearFlow(Module):
             encoder_hidden_states: torch.Tensor, 
             noise: Tensor | None = None,
             cond_image=None, 
-            mask=None, 
+            mask=None,
+            loss_mask=None,
             **model_kwargs
         ):
 
@@ -166,6 +167,6 @@ class LinearFlow(Module):
         # getting flow and pred flow for main model
         flow, pred_flow, pred_x = get_noised_and_flows(self.model, padded_times)
 
-        main_loss = self.loss_fn(pred_flow, flow) #, pred_data = pred_x, times = times, data = x)
+        main_loss = self.loss_fn(pred_flow, flow, loss_mask) #, pred_data = pred_x, times = times, data = x)
 
         return main_loss

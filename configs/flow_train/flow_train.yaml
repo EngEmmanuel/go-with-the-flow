@@ -11,8 +11,8 @@ dataset:
 flow:
   type: linear
   kwargs:
-    clip_values: [-.inf, .inf]
-    clip_flow_values: [-.inf, .inf]
+    clip_values: null #[-.inf, .inf]
+    clip_flow_values: null # [-.inf, .inf]
 
 vae:
   resolution: 4f4
@@ -23,13 +23,15 @@ vae:
 
 trainer:
   lr: 1e-4
+  loss_mask: pad
   kwargs:
     max_epochs: 1000
-    val_check_interval: 0.1
     precision: 32
     accelerator: auto
-    accumulate_grad_batches: 1
+    val_check_interval: 0.1
+    acculmulate_grad_batches: 1
     #profiler: simple
+    #overfit_batches: 0.1
 
 
 sample_every_n_val_steps: 400
