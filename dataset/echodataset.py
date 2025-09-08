@@ -20,6 +20,7 @@ class EchoDataset(Dataset):
         self.split = split.lower()
         self.cache = cache
         self._cache = {}  # dict for in-memory caching
+        self.kwargs = kwargs
 
         # Filter dataframe based on split
         if split == 'sample':
@@ -71,7 +72,20 @@ class EchoDataset(Dataset):
         '''
         T = video.shape[0]
 
-        n_missing_frames = self.missing_frame_distribution(T, dist=dist)
+        # Allow specifying a fixed number or proportion of frames to mask
+        if self.split != 'test' or self.kwargs.get('n_missing_frames') is None:
+            n_missing_frames = self.missing_frame_distribution(T, dist=dist)
+        else:
+            n_missing_frames = self.kwargs.get('n_missing_frames')
+            if isinstance(n_missing_frames, int): # if int, it's a fixed number of frames
+                n_missing_frames = n_missing_frames
+            if isinstance(n_missing_frames, float): # if 0 <= float < 1, it's a proportion of frames
+                n_missing_frames = int(T * n_missing_frames)
+            if n_missing_frames == 'max': # all but one frame
+                n_missing_frames = T - 1
+            assert 0 < n_missing_frames < T, "n_missing_frames must be in the range [0, T)"
+
+        # Sample frame indices to mask
         mask_indices = random.sample(range(T), n_missing_frames)
 
         mask = torch.ones_like(video)
@@ -113,7 +127,7 @@ class EchoDataset(Dataset):
             case None:
                 pass
             case 'pad_and_observed': # Generation only. Ignores all frames that are present in the input AND condition.
-                observed_mask = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
+                observed_mask, _ = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
                 #(T,C,H,W) -> (T,)
                 outputs["loss_mask"] = observed_mask[..., 0, 0, 0]
             case 'pad': # Generation and Reconstruction. Ignores padded frames. Model has to learn to reconstruct seen frames

@@ -87,6 +87,8 @@ def _save_video_cv2(video_T3HW: torch.Tensor, out_path: Path, fps: int = 16) -> 
     _ensure_dir(out_path.parent)
     T, C, H, W = video_T3HW.shape
     assert C == 3, f"Expected 3 channels after decoding, got {C}"
+    second_type = ('.mp4', 'mp4v')
+    first_type = ('.avi', 'XVID')
 
     # Helper to attempt a writer
     def _try_writer(path: Path, fourcc_code: str):
@@ -95,14 +97,14 @@ def _save_video_cv2(video_T3HW: torch.Tensor, out_path: Path, fps: int = 16) -> 
         return writer
 
     # First try MP4
-    writer = _try_writer(out_path.with_suffix('.mp4'), 'mp4v')
+    writer = _try_writer(out_path.with_suffix(first_type[0]), first_type[1])
     used_path = out_path.with_suffix('.mp4')
 
     if not writer.isOpened():
         # Fallback to AVI
         if writer is not None:
             writer.release()
-        writer = _try_writer(out_path.with_suffix('.avi'), 'XVID')
+        writer = _try_writer(out_path.with_suffix(second_type[0]), second_type[1])
         used_path = out_path.with_suffix('.avi')
 
     if not writer.isOpened():
@@ -277,3 +279,4 @@ if __name__ == "__main__":
         device=device,
         metadata_csv_path=f"data/CAMUS_Latents_{vae_res}/metadata.csv"
     )
+
