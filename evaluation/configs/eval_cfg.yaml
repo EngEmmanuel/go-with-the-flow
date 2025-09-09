@@ -1,0 +1,29 @@
+
+tasks: ['gen_latents', 'latents_to_videos']  # add 'compute_metrics' to enable metrics
+
+run_dir: outputs/hydra_outputs/2025-09-03/15-24-24
+ckpt_name: last.ckpt
+
+output_dir: ${run_dir}/evaluation
+
+# Evaluate to latents parameters
+test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
+test_ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
+n_ef_samples_in_range: 4  # Number of ef_gen samples per video in ef_gen_range
+
+# Latents to videos parameters
+latents_dir: null
+repo_id: HReynaud/EchoFlow
+types: [videowise]  # output types e.g., 'videowise' or 'framewise' or both
+query: rec_or_gen == "rec" # Query to filter which latents to convert to videos
+fps_metadata_csv: data/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
+
+# Metrics parameters (used when tasks includes 'compute_metrics')
+metrics:
+  real_root: null            # path to real dataset root (video folders with PNG frames)
+  fake_root: null            # path to generated dataset root (matching structure)
+  which: [ssim, psnr, lpips_vgg]  # metrics to compute
+  stylegan_metrics: [fvd2048_16f,fvd2048_32f,fid50k_full,is2048_ucf]
+  confidence: 0.95           # confidence level for CIs
+  #resize: [112, 112]         # optional resize (H, W); set to null to keep native
+  max_videos: null           # optionally limit number of videos for a quick run

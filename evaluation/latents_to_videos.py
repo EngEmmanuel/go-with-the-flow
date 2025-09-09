@@ -3,6 +3,7 @@ from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 import argparse
+import subprocess
 from typing import Optional, Dict, List
 
 import torch
@@ -18,8 +19,23 @@ from vae.util import load_vae_and_processor
 from vae.decode_latent_to_image import (
     _to_TCHW,
     _decode_frames_with_vae,
-    _save_video_cv2,
 )
+
+def query_to_filename(query: str) -> str:
+    mapping = {
+        '==': 'eq',
+        '!=': 'neq',
+        '>=': 'ge',
+        '<=': 'le',
+        '>': 'gt',
+        '<': 'lt',
+        '"': '',
+        "'": '',
+        ' ': '_',
+    }
+    for k, v in mapping.items():
+        query = query.replace(k, v)
+    return query
 
 
 def _load_cfg(run_dir: Path):
@@ -59,8 +75,42 @@ def _save_frames(decoded_T3HW: torch.Tensor, out_dir: Path):
         Image.fromarray(arr).save(out_dir / f"frame_{t}.png")
 
 
-def convert_latent_directory(
-    latent_dir: Path,
+def _make_video_with_ffmpeg(frames_dir: Path, out_path: Path, fps: float) -> bool:
+    """Create a video from PNG frames using ffmpeg's glob pattern.
+
+    Returns True on success, False otherwise.
+    """
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    # Ensure there are frames to encode
+    if len(list(frames_dir.glob("*.png"))) == 0:
+        print(f"[warn] No PNG frames found in {frames_dir}, skipping video creation")
+        return False
+    # Use an absolute glob pattern so we don't rely on cwd
+    input_pattern = str(frames_dir / "*.png")
+    cmd = [
+        "ffmpeg",
+        "-y",
+        "-loglevel", "error",
+        "-framerate", str(fps),
+        "-pattern_type", "glob",
+        "-i", input_pattern,
+        "-c:v", "libx264",
+        "-pix_fmt", "yuv420p",
+        str(out_path),
+    ]
+    try:
+        subprocess.run(cmd, check=True)
+        return True
+    except FileNotFoundError:
+        print("[warn] ffmpeg not found on PATH; skipping video creation")
+        return False
+    except subprocess.CalledProcessError as e:
+        print(f"[warn] ffmpeg failed for {frames_dir} -> {out_path}: {e}")
+        return False
+
+
+def convert_latents_directory(
+    latents_dir: Path,
     run_dir: Path,
     repo_id: str,
     output_dir: Optional[Path] = None,
@@ -85,9 +135,10 @@ def convert_latent_directory(
     - device: torch device; auto-selected if None
     """
     types = types or ["framewise", "videowise"]
-    latent_dir = Path(latent_dir)
+    latents_dir = Path(latents_dir)
     run_dir = Path(run_dir)
-    output_dir = Path(output_dir) if output_dir else (latent_dir.parent / "decoded_videos"/ datetime.now().strftime("%Y-%m-%d_%H-%M-%S"))
+    default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-2:])) / (query_to_filename(query) if query else 'all')
+    output_dir = Path(output_dir) if output_dir else default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load cfg then VAE (subfolder derived from cfg)
@@ -97,7 +148,7 @@ def convert_latent_directory(
     vae, _ = load_vae_and_processor(vae_locator=repo_id, subfolder=subfolder, device=device)
 
     # Load metadata and filter
-    meta_path = latent_dir / "metadata.csv"
+    meta_path = latents_dir / "metadata.csv"
     df = pd.read_csv(meta_path)
     if query:
         try:
@@ -123,7 +174,7 @@ def convert_latent_directory(
         video_name = str(row["video_name"]) if "video_name" in row else None
         if not video_name:
             continue
-        pt_path = latent_dir / f"{video_name}.pt"
+        pt_path = latents_dir / f"{video_name}.pt"
         if not pt_path.exists():
             print(f"[warn] Missing latent file: {pt_path}")
             continue
@@ -137,48 +188,50 @@ def convert_latent_directory(
         # decode to (T, 3, H', W') on CPU
         decoded_T3HW = _decode_frames_with_vae(vae, frames_TCHW, batch_size=decode_batch_size)
 
-        # write outputs
-        if "framewise" in types:
-            out_frames_dir = output_dir / "framewise" / video_name
-            _save_frames(decoded_T3HW, out_frames_dir)
+        # Always write framewise outputs (needed for ffmpeg video composition)
+        out_frames_dir = output_dir / "framewise" / video_name
+        _save_frames(decoded_T3HW, out_frames_dir)
 
+        # Optionally compose a videowise mp4 using ffmpeg over the saved frames
         if "videowise" in types:
-            out_video_stem = output_dir / "videowise" / video_name
-            video_fps = _get_fps(video_name, fps, fps_map)
-            _save_video_cv2(decoded_T3HW, out_video_stem, fps=video_fps)
+            out_video_path = (output_dir / "videowise" / video_name).with_suffix(".mp4")
+            video_fps = _get_fps(row['original_real_video_name'], fps, fps_map)
+            _make_video_with_ffmpeg(out_frames_dir, out_video_path, fps=video_fps)
 
+    df.to_csv(output_dir / 'metadata.csv', index=False)
     print(f"[done] Outputs saved under: {output_dir}")
     return output_dir
 
 
-def parse_args():
-    p = argparse.ArgumentParser(description="Convert latent outputs to videos/frames")
-    p.add_argument("latent_dir", type=str, help="Directory with latent .pt files and metadata.csv")
-    p.add_argument("run_dir", type=str, help="Hydra run dir with .hydra/config.yaml (used to derive VAE subfolder)")
-    p.add_argument("repo_id", type=str, help="HF repo id for the VAE, e.g., HReynaud/EchoFlow")
-    p.add_argument("--output-dir", type=str, default=None, help="Output directory (default: <latent_dir>/../decoded_eval)")
-    p.add_argument("--types", type=str, nargs="*", choices=["framewise", "videowise"], default=["framewise", "videowise"], help="Output types")
-    p.add_argument("--query", type=str, default=None, help="pandas query to filter metadata rows")
-    p.add_argument("--fps", type=int, default=16, help="Default FPS when metadata CSV is not provided")
-    p.add_argument("--fps-metadata-csv", type=str, default=None, help="CSV with video_name and FPS column to override default FPS")
-    p.add_argument("--decode-batch-size", type=int, default=16, help="Frames per decode batch")
-    return p.parse_args()
+'''
+Convert latent outputs to videos/frames"
+--latent_dir", type=str, help="Directory with latent .pt files and metadata.csv")
+--run_dir", type=str, help="Hydra run dir with .hydra/config.yaml (used to derive VAE subfolder)")
+--repo_id", type=str, help="HF repo id for the VAE, e.g., HReynaud/EchoFlow")
+--output-dir", type=str, default=None, help="Output directory (default: <latent_dir>/../decoded_eval)")
+--types", type=str, nargs="*", choices=["framewise", "videowise"], default=["framewise", "videowise"], help="Output types")
+--query", type=str, default=None, help="pandas query to filter metadata rows")
+--fps", type=int, default=16, help="Default FPS when metadata CSV is not provided")
+--fps-metadata-csv", type=str, default=None, help="CSV with video_name and FPS column to override default FPS")
+--decode-batch-size", type=int, default=16, help="Frames per decode batch")
+'''
 
 
 if __name__ == "__main__":
     #args = parse_args()
+    date, time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S").split("_")
     run_dir = Path('outputs/hydra_outputs/2025-09-03/15-24-24')
-    latent_dir = run_dir / 'evaluation' / 'latents' / '2025-09-08_21-11-22'
-    output_dir = run_dir / 'evaluation' / 'decoded_videos' / datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    latent_dir = run_dir / 'evaluation' / 'latents' / '2025-09-09' /'16-31-27'
+    output_dir = run_dir / 'evaluation' / 'decoded_videos' / date/ time
 
     device = select_device()
     query = 'rec_or_gen == "gen"'
-    convert_latent_directory(
-        latent_dir=latent_dir,
+    convert_latents_directory(
+        latents_dir=latent_dir,
         run_dir=run_dir,
         repo_id="HReynaud/EchoFlow",
         output_dir=output_dir,
-        types=["framewise", "videowise"],
+        types=["videowise"],
         query=query,
         fps_metadata_csv="data/CAMUS_Latents_{vae_res}/metadata.csv",
         device=device,
