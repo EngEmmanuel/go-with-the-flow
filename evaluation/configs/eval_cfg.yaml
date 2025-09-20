@@ -1,7 +1,13 @@
+defaults:
+  - _self_ # First takes priority so any properties redefined here take precedence
+  - paths: ibme_cluster # Simply override in cli call
 
-tasks: ['gen_latents', 'latents_to_videos']  # add 'compute_metrics' to enable metrics
+tasks: ['gen_latents', 'latents_to_videos','compute_metrics' ] #to enable metrics
+#tasks: ['compute_metrics', 'latents_to_videos'] #to disable metrics
+#tasks: ['compute_metrics'] #to enable metrics
 
-run_dir: outputs/hydra_outputs/2025-09-03/15-24-24
+real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
+run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-04/15-14-40
 ckpt_name: last.ckpt
 
 output_dir: ${run_dir}/evaluation
@@ -12,18 +18,19 @@ test_ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
 n_ef_samples_in_range: 4  # Number of ef_gen samples per video in ef_gen_range
 
 # Latents to videos parameters
-latents_dir: null
+latents_dir: null #${run_dir}/evaluation/latents/2025-09-13/01-55-20 #null #
 repo_id: HReynaud/EchoFlow
 types: [videowise]  # output types e.g., 'videowise' or 'framewise' or both
-query: rec_or_gen == "rec" # Query to filter which latents to convert to videos
-fps_metadata_csv: data/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
+query: rec_or_gen == "gen" # Query to filter which latents to convert to videos
+mode: gen # 'rec' or 'gen'
+fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
 
 # Metrics parameters (used when tasks includes 'compute_metrics')
 metrics:
-  real_root: null            # path to real dataset root (video folders with PNG frames)
-  fake_root: null            # path to generated dataset root (matching structure)
+  inference_root: ${run_dir}/evaluation/decoded_videos/2025-09-13/01-55-20/rec_or_gen_eq_rec/
+  real_glob: '*'            # glob pattern to match real videos
+  fake_glob: 'patient*nmfmax'            # glob pattern to match generated videos
   which: [ssim, psnr, lpips_vgg]  # metrics to compute
-  stylegan_metrics: [fvd2048_16f,fvd2048_32f,fid50k_full,is2048_ucf]
+  stylegan_metrics: [fid50k_full, is50k, fvd2048_10f]
   confidence: 0.95           # confidence level for CIs
   #resize: [112, 112]         # optional resize (H, W); set to null to keep native
-  max_videos: null           # optionally limit number of videos for a quick run

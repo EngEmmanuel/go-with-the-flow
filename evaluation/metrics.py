@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 import math
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
@@ -10,10 +11,10 @@ import pandas as pd
 from PIL import Image
 from datetime import datetime
 from omegaconf import OmegaConf
-try:
-    from skimage.metrics import structural_similarity as skimage_ssim
-except Exception:
-    skimage_ssim = None
+from skimage.metrics import structural_similarity as skimage_ssim
+
+# Masking no longer used; compute unmasked metrics only
+
 
 
 def _to_tensor(img: Image.Image, device: Optional[torch.device] = None) -> torch.Tensor:
@@ -99,21 +100,79 @@ def _conf_int(values: List[float], confidence: float = 0.95) -> Tuple[float, flo
     half_width = tcrit * se
     return mean, mean - half_width, mean + half_width
 
-
-def compute_metrics_for_datasets(
+def get_real_and_fake_video_folders(
     real_root: Path,
     fake_root: Path,
+    real_glob: str = '*',
+    fake_glob: str = '*',
+    regex_pattern: str = r"^patient\d{4}_(?:2CH|4CH)"
+):
+    # Pair video directories by common names
+    real_videos = {vid_folder.name: vid_folder for vid_folder in real_root.glob(real_glob) if vid_folder.is_dir()}
+    fake_videos = {vid_folder.name: vid_folder for vid_folder in fake_root.glob(fake_glob) if vid_folder.is_dir()}
+
+    # Regex to capture patient####_<view>
+    prefix_pattern = re.compile(regex_pattern)
+
+    # Build prefix → fake_path dict
+    fake_prefix_map = {}
+    for fake_name, fake_path in fake_videos.items():
+        m = prefix_pattern.match(fake_name)
+        if not m:
+            raise ValueError(f"Unexpected fake video name format: {fake_name}")
+        prefix = m.group(0)
+        if prefix in fake_prefix_map:
+            raise ValueError(f"Multiple fake videos found with prefix {prefix}")
+        fake_prefix_map[prefix] = fake_path
+
+    # Build prefix → real_path dict
+    real_prefix_map = {}
+    for real_name, real_path in real_videos.items():
+        m = prefix_pattern.match(real_name)
+        if not m:
+            raise ValueError(f"Unexpected real video name format: {real_name}")
+        prefix = m.group(0)
+        if prefix in real_prefix_map:
+            raise ValueError(f"Multiple real videos found with prefix {prefix}")
+        real_prefix_map[prefix] = real_path
+
+    # Intersect keys to only keep common prefixes
+    common_prefixes = set(real_prefix_map.keys()) & set(fake_prefix_map.keys())
+
+    # Build paired_videos
+    paired_videos = {
+        prefix: (real_prefix_map[prefix], fake_prefix_map[prefix])
+        for prefix in common_prefixes
+    }
+
+    # Report stats
+    print(f"Total pairs: {len(paired_videos)}")
+    print(f"Omitted from real_videos: {len(real_prefix_map) - len(common_prefixes)}")
+    print(f"Omitted from fake_videos: {len(fake_prefix_map) - len(common_prefixes)}")
+    return paired_videos
+
+
+def compute_metrics_for_datasets(
+    inference_root: Path,
     metrics: List[str],
     output_dir: Path,
     confidence: float = 0.95,
     resize: Optional[Tuple[int, int]] = None,
     device: Optional[torch.device] = None,
-    max_videos: Optional[int] = None,
+    real_glob: str = '*',
+    fake_glob: str = '*',
 ) -> Dict[str, Path]:
-    real_root = Path(real_root)
-    fake_root = Path(fake_root)
+    real_root = inference_root / 'real'
+    fake_root = inference_root / 'fake'
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+
+    paired_videos = get_real_and_fake_video_folders(
+        real_root=real_root,
+        fake_root=fake_root,
+        real_glob=real_glob,
+        fake_glob=fake_glob,
+    )
 
     # Prepare optional LPIPS model
     want_lpips = any(m.lower() in ("lpips", "lpips_vgg") for m in metrics)
@@ -121,88 +180,84 @@ def compute_metrics_for_datasets(
     if want_lpips and lpips_net is None:
         print("[warn] lpips package not found; LPIPS(VGG) will be skipped or set to NaN.")
 
-    # Pair video directories by common names
-    real_videos = {p.name: p for p in real_root.iterdir() if p.is_dir()}
-    fake_videos = {p.name: p for p in fake_root.iterdir() if p.is_dir()}
-    common = sorted(set(real_videos.keys()) & set(fake_videos.keys()))
-    if max_videos is not None:
-        common = common[:max_videos]
-    if not common:
-        raise ValueError("No common video folders between real and fake roots.")
-
     # Save under fake_root/metric_results with a single YAML
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = Path(fake_root) / 'metric_results'
+    out_dir = Path(fake_root).parent / 'metric_results'
     out_dir.mkdir(parents=True, exist_ok=True)
     result_yaml = out_dir / f"metrics_{ts}.yaml"
 
     rows = []
-    # Accumulate per-video metrics
-
-    for vid in common:
-        rdir = real_videos[vid]
-        fdir = fake_videos[vid]
+    for real_name, (rdir, fdir) in paired_videos.items():
         rframes = sorted(rdir.glob('*.png'))
         fframes = sorted(fdir.glob('*.png'))
-        n = min(len(rframes), len(fframes))
+        # Use overlapping frame count only
+        n = min(len(fframes), len(rframes))
         if n == 0:
             continue
-        rframes = rframes[:n]
-        fframes = fframes[:n]
 
-        ssim_vals: List[float] = []
-        psnr_vals: List[float] = []
-        lpips_vals: List[float] = []
+        # Buckets for metrics (only _all variant retained)
+        ssim: List[float] = []
+        psnr: List[float] = []
+        lp: List[float] = []
 
-        for rp, fp in zip(rframes, fframes):
-            x = _load_image(rp, resize=resize, device=device)
+        want_ssim = 'ssim' in [m.lower() for m in metrics]
+        want_psnr = 'psnr' in [m.lower() for m in metrics]
+        want_lp = want_lpips and lpips_net is not None
+
+        for i in range(n):
+            fp = fframes[i]
+            rp = rframes[i]
             y = _load_image(fp, resize=resize, device=device)
-            # Ensure same size
+            x = _load_image(rp, resize=resize, device=device)
             if x.shape != y.shape:
                 h = min(x.shape[1], y.shape[1])
                 w = min(x.shape[2], y.shape[2])
-                x = F.interpolate(x.unsqueeze(0), size=(h, w), mode='bilinear', align_corners=False).squeeze(0)
-                y = F.interpolate(y.unsqueeze(0), size=(h, w), mode='bilinear', align_corners=False).squeeze(0)
+                x = F.interpolate(x.unsqueeze(0), size=(h, w), mode='bicubic', align_corners=False).squeeze(0)
+                y = F.interpolate(y.unsqueeze(0), size=(h, w), mode='bicubic', align_corners=False).squeeze(0)
 
-            if 'ssim' in [m.lower() for m in metrics]:
-                ssim_vals.append(_ssim(x, y))
-            if 'psnr' in [m.lower() for m in metrics]:
-                psnr_vals.append(_psnr(x, y))
-            if want_lpips and lpips_net is not None:
-                lpips_vals.append(_lpips_vgg(lpips_net, x, y))
+            if want_ssim:
+                ssim.append(_ssim(x, y))
+            if want_psnr:
+                psnr.append(_psnr(x, y))
+            if want_lp:
+                lp.append(_lpips_vgg(lpips_net, x, y))
 
-        row: Dict[str, float | str] = {'video_name': vid}
-        if ssim_vals:
-            row['ssim'] = float(sum(ssim_vals) / len(ssim_vals))
-        if psnr_vals:
-            row['psnr'] = float(sum(psnr_vals) / len(psnr_vals))
+        row = {'video_pair': (rdir.name, fdir.name)}
+        if ssim:
+            row['ssim'] = round(float(sum(ssim) / len(ssim)), 4)
+        if psnr:
+            row['psnr'] = round(float(sum(psnr) / len(psnr)), 4)
         if want_lpips:
-            row['lpips_vgg'] = float(sum(lpips_vals) / len(lpips_vals)) if lpips_vals else float('nan')
+            row['lpips_vgg'] = round(float(sum(lp) / len(lp)), 4) if lp else float('nan')
         rows.append(row)
 
     per_video_df = pd.DataFrame(rows)
 
     # Summaries with CIs
     summary_rows = []
-    for metric in ['ssim', 'psnr', 'lpips_vgg']:
-        if metric in per_video_df.columns:
-            vals = per_video_df[metric].dropna().tolist()
+    metric_bases = [m.lower() for m in metrics]
+    for base in metric_bases:
+        col_base = 'lpips_vgg' if base in ('lpips', 'lpips_vgg') else base
+        col = col_base
+        if col in per_video_df.columns:
+            vals = per_video_df[col].dropna().tolist()
             mean, lo, hi = _conf_int(vals, confidence)
-            summary_rows.append({'metric': metric, 'mean': mean, 'ci_low': lo, 'ci_high': hi, 'n_videos': len(vals)})
+            summary_rows.append({'metric': col, 'mean': round(mean, 4), 'ci_low': round(lo, 4), 'ci_high': round(hi, 4), 'n_videos': len(vals)})
 
     # Prepare YAML payload
     payload: Dict = {
         'config': {
             'real_root': str(real_root),
             'fake_root': str(fake_root),
+            'real_glob': real_glob,
+            'fake_glob': fake_glob,
             'which': list(metrics),
             'confidence': float(confidence),
             'resize': list(resize) if resize is not None else None,
-            'max_videos': int(max_videos) if max_videos is not None else None,
             'timestamp': ts,
         },
-        'per_video': rows,
         'summary': summary_rows,
+        'per_video': rows,
     }
 
     OmegaConf.save(config=OmegaConf.create(payload), f=str(result_yaml))
