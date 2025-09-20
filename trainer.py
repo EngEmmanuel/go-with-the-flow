@@ -1,5 +1,6 @@
 
 import torch
+import wandb 
 import hydra
 import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
@@ -13,17 +14,13 @@ from pytorch_lightning import LightningModule, Trainer
 from pytorch_lightning.loggers import WandbLogger
 from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 #from pytorch_lightning.callbacks.weight_averaging import WeightAveraging
-import wandb # type: ignore
-import sklearn.metrics
 
-
-from src.models import UNetSTIC, DiffuserSTDiT
+from my_src.models import UNetSTIC, DiffuserSTDiT
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
-from src.flows import LinearFlow
+from my_src.flows import LinearFlow
 from dataset import make_sampling_collate
 from vae.util import load_vae_and_processor
-
 
 
 def cycle(dl):
@@ -206,6 +203,8 @@ def main(cfg: DictConfig):
         **cfg.wandb,
         config=OmegaConf.to_container(cfg, resolve=True)
     )
+    run = logger.experiment
+    run.summary['local_output_dir'] = str(output_dir)
 
     # Instantiate trainers
     trainer = Trainer(
