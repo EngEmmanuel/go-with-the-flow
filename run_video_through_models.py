@@ -17,7 +17,7 @@ import argparse
 import torch
 import torch.nn as nn
 
-import src.models as sm
+import my_src.models as sm
 
 
 def make_random_video(batch=1, channels=3, frames=2, height=16, width=16, device="cpu"):
