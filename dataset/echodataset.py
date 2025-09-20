@@ -75,6 +75,8 @@ class EchoDataset(Dataset):
         # Allow specifying a fixed number or proportion of frames to mask
         if self.split != 'test' or self.kwargs.get('n_missing_frames') is None:
             n_missing_frames = self.missing_frame_distribution(T, dist=dist)
+            # Sample frame indices to mask
+            mask_indices = random.sample(range(T), n_missing_frames)
         else:
             n_missing_frames = self.kwargs.get('n_missing_frames')
             if isinstance(n_missing_frames, int): # if int, it's a fixed number of frames
@@ -85,8 +87,11 @@ class EchoDataset(Dataset):
                 n_missing_frames = T - 1
             assert 0 < n_missing_frames < T, "n_missing_frames must be in the range [0, T)"
 
-        # Sample frame indices to mask
-        mask_indices = random.sample(range(T), n_missing_frames)
+            # Sample frame indices to mask
+            mask_indices = random.sample(range(T), n_missing_frames)
+            while (0 not in mask_indices) and (T-1 not in mask_indices): # ensure at least one of first or last frame is masked
+                mask_indices = random.sample(range(T), n_missing_frames)
+
 
         mask = torch.ones_like(video)
         mask[mask_indices, ...] = 0
@@ -123,10 +128,19 @@ class EchoDataset(Dataset):
         outputs = {"z": z, "cond": cond}
 
         # Mask for where to compute the loss
+        if self.split == 'test':
+            observed_mask, _ = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
+            not_pad_mask = 1. - pad_mask[..., 0, 0, 0]
+
+            outputs['observed_mask'] = observed_mask[..., 0, 0, 0]
+            outputs['not_pad_mask'] = not_pad_mask
+            return outputs
+
+        # Only for training and validation
         match self.cfg.trainer.get('loss_mask'):
             case None:
                 pass
-            case 'pad_and_observed': # Generation only. Ignores all frames that are present in the input AND condition.
+            case 'pad_and_observed': # Generation only. Ignores all frames that are present in the (input AND condition).
                 observed_mask, _ = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
                 #(T,C,H,W) -> (T,)
                 outputs["loss_mask"] = observed_mask[..., 0, 0, 0]
@@ -183,5 +197,7 @@ class EchoDataset(Dataset):
 
         if self.split in ['sample', 'test']:
             inputs['video_name'] = row['video_name']
+            inputs['observed_mask'] = transformed_dict.get('observed_mask')
+            inputs['not_pad_mask'] = transformed_dict.get('not_pad_mask')
 
         return inputs

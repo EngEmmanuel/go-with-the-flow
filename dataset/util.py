@@ -30,7 +30,8 @@ def make_sampling_collate(n: int, **kwargs):
 
         ehs_rep = ef_values.view(n, 1, 1).expand(-1, 1, ehs_dim)       # (n, 1, E)
 
-        reference_batch = {'cond_image': cond_image, 'ef_values': ef_values, 'video_name': video_name}
+        reference_batch = {'cond_image': cond_image, 'ef_values': ef_values, 'video_name': video_name, 
+                           'observed_mask': sample['observed_mask'], 'not_pad_mask': sample['not_pad_mask']}
         repeated_batch = {'cond_image': cond_rep, 'encoder_hidden_states': ehs_rep}
         return reference_batch, repeated_batch
     return _collate
