@@ -4,7 +4,7 @@ from torch.nn import Module
 from torch import Tensor
 from torchdiffeq import odeint
 from einops import rearrange, repeat
-from src.custom_loss import MaskedMSELoss
+from my_src.custom_loss import MaskedMSELoss
 # Code adapted from https://github.com/lucidrains/rectified-flow-pytorch/blob/main/rectified_flow_pytorch/rectified_flow.py
 
 def identity(t):
