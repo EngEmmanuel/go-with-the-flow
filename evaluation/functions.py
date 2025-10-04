@@ -11,7 +11,7 @@ from omegaconf import OmegaConf
 from utils.util import select_device
 from trainer import load_model as build_model_from_cfg, load_flow
 
-
+#TODO Maybe specify the cond channels in the config instead of hardcoding here?
 def _infer_data_shape(cfg):
 	"""Infer (T, C, H, W) from cfg.dataset.shape or by reading the first latent .pt.
 
@@ -161,6 +161,7 @@ def evaluate_to_latents(model, test_dl_list, run_cfg, eval_cfg, device):
 		for batch in tqdm(dl, desc="Batches"):
 			reference_batch, repeated_batch = batch
 			batch_size, *data_shape = repeated_batch['cond_image'].shape
+			data_shape[0] = 4 #TODO Fix cond channels hardcoded
 
 			repeated_batch = {k: v.to(device) for k, v in repeated_batch.items()}
 
@@ -185,7 +186,7 @@ def evaluate_to_latents(model, test_dl_list, run_cfg, eval_cfg, device):
 					'not_pad_mask': reference_batch['not_pad_mask'].tolist()
 				})
 				stitched_video = stitch_video(
-					input_video=reference_batch['cond_image'].cpu()/run_cfg.vae.scaling_factor,
+					input_video=reference_batch['cond_image'].cpu()[:4]/run_cfg.vae.scaling_factor,
 					output_video=video,
 					observed_mask=reference_batch['observed_mask'].tolist(),
 					not_pad_mask=reference_batch['not_pad_mask'].tolist()

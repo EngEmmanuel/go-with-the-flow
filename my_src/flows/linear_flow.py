@@ -123,7 +123,6 @@ class LinearFlow(Module):
             times = repeat(times, '1 -> b', b = batch)
 
         # Unet and STDiT forward(x, timestep, encoder_hidden_states=None, cond_image=None, mask=None, return_dict=True)
-
         output = self.model(x=noised, timestep=times, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, mask=mask, **model_kwargs) # predicted flow / velocity field
         if hasattr(output, 'sample'):
             return output.sample

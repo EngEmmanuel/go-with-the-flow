@@ -321,10 +321,8 @@ def convert_latents_directory(
             _save_frames(real_stitched, out_frames_dir_stitched_real)
 
         # No-pad video: mask keep of not_pad_mask
-        try:
-            not_pad_mask_list = _coerce_mask_list(row.get('not_pad_mask', []), T_expected=frames_TCHW.shape[0])
-        except Exception as e:
-            not_pad_mask_list = [1.0] * frames_TCHW.shape[0]
+        not_pad_mask_list = _coerce_mask_list(row.get('not_pad_mask'), T_expected=frames_TCHW.shape[0])
+
         no_pad_TCHW = _apply_mask_select_TCHW(frames_TCHW, not_pad_mask_list, invert=False)
         decoded_no_pad = _decode_frames_with_vae(vae, no_pad_TCHW, batch_size=decode_batch_size) if no_pad_TCHW.shape[0] > 0 else no_pad_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
         out_frames_dir_no_pad_fake = output_dir / "framewise_no_pad" / "fake" / video_name
@@ -336,16 +334,17 @@ def convert_latents_directory(
         _save_frames(real_no_pad, out_frames_dir_no_pad_real)
 
         # Generated-only video: mask keep of NOT observed_mask
-        try:
-            observed_mask_list = _coerce_mask_list(row.get('observed_mask', []), T_expected=frames_TCHW.shape[0])
-        except Exception as e:
-            observed_mask_list = [0.0] * frames_TCHW.shape[0]
-        generated_TCHW = _apply_mask_select_TCHW(frames_TCHW, observed_mask_list, invert=True)
+        observed_mask_list = _coerce_mask_list(row.get('observed_mask'), T_expected=frames_TCHW.shape[0])
+        not_pad_mask_list = _coerce_mask_list(row.get('not_pad_mask'), T_expected=frames_TCHW.shape[0])
+        # Gets the generated frames but does not include padded frames i.e., (not observed) minus (padded)
+        generated_mask_list = [(1.- x)-(1. - y) for x, y in zip(observed_mask_list, not_pad_mask_list)]
+
+        generated_TCHW = _apply_mask_select_TCHW(frames_TCHW, generated_mask_list, invert=False)
         decoded_generated = _decode_frames_with_vae(vae, generated_TCHW, batch_size=decode_batch_size) if generated_TCHW.shape[0] > 0 else generated_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
         out_frames_dir_generated_fake = output_dir / "framewise_generated" / "fake" / video_name
         _save_frames(decoded_generated, out_frames_dir_generated_fake)
         # Real counterpart: resampled real then apply NOT observed_mask (hidden frames)
-        keep_gen = torch.tensor(observed_mask_list, dtype=torch.float32) <= 0.5
+        keep_gen = torch.tensor(generated_mask_list, dtype=torch.float32) >= 0.5
         real_generated = real_T3HW_resampled[keep_gen]
         out_frames_dir_generated_real = output_dir / "framewise_generated" / "real" / real_video_name
         _save_frames(real_generated, out_frames_dir_generated_real)

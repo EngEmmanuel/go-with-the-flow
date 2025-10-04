@@ -59,7 +59,12 @@ class FlowVideoGenerator(LightningModule):
 
         self._val_counter = 0
 
+        # learned 1-D null EF
+        self.null_ehs = torch.nn.Parameter(torch.zeros(1, 1))  # shape [1,1]
+        self.uncond_prob = float(cfg.trainer.get('uncond_prob', 0.0))
+
     def training_step(self, batch, batch_idx):
+        batch = self.maybe_drop_cond(batch)
         loss = self.model(**batch)
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
@@ -116,19 +121,45 @@ class FlowVideoGenerator(LightningModule):
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
         return optimizer
+    
+    def maybe_drop_cond(self, batch):
+        ehs = batch.get('encoder_hidden_states', None)  # [B, 1]
+        if ehs is None or self.uncond_prob <= 0.0:
+            return batch
+
+        B = ehs.shape[0]
+        # boolean mask (no in-place ops)
+        drop = (torch.rand(B, device=ehs.device) < self.uncond_prob)  # True => drop EF
+
+        if drop.any():
+            m = drop.view(B, 1)                               # [B,1], bool
+            null = self.nullf_ehs.expand_as(ehs)               # shape-match; dtype/device handled by PL
+            ehs = torch.where(m, null, ehs)                   # functional, no in-place
+            batch['encoder_hidden_states'] = ehs
+
+        # log right before returning (only runs when CFG-style dropout is active)
+        self.log("train/null_ehs_value", self.null_ehs.item(),
+                on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
+        self.log("train/ef_drop_rate", drop.float().mean().item(),
+                on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
+        return batch
 
 
-
-
-
-def load_model(cfg, data_shape, device):
-    T, C, H, W = data_shape
+def load_model(cfg, dummy_data, device):
+    if isinstance(dummy_data, dict):
+        C, T, H, W = dummy_data['x'].shape
+        Cc, _, _, _ = dummy_data['cond_image'].shape
+    else:
+        _, C, H, W = dummy_data
+        Cc = C + 1
+        T =32
+    print('input shape:', (C+Cc, T, H, W))
 
     match (cfg.model.type).lower():
         case "unet":
             return UNetSTIC(
-                sample_size=W, # (T, C, H, W)
-                in_channels=C + C, # model expects concatenated x and cond_image along channels
+                sample_size=W,
+                in_channels=C + Cc, # model expects concatenated x and cond_image along channels
                 out_channels=C,
                 num_frames=T,
                 **cfg.model.kwargs
@@ -136,7 +167,7 @@ def load_model(cfg, data_shape, device):
         case "transformer":
             return DiffuserSTDiT(
                 input_size=(T, H, W),
-                in_channels=C + C,
+                in_channels=C + Cc,
                 out_channels=C,
                 **cfg.model.kwargs
             ).to(device)
@@ -154,10 +185,6 @@ def load_flow(cfg, model):
 
     raise ValueError(f"Unsupported flow class: {cfg.flow.type}")
 
-
-#TODO LOAD VAE PROCESSOR. SEE HOW THINGS NEED TO BE SCALED FOR TRAIN AND SAMPLING
-#TODO REVISIT DECODE_LATENT_IMAGE
-#TODO START TRAINING SOMETHING
 def load_vae_processor(cfg, device):
     vae, processor = load_vae_and_processor(
         repo_id=cfg.vae.repo_id,
@@ -184,10 +211,11 @@ def main(cfg: DictConfig):
     train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
     val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size, num_workers=4, pin_memory=True, persistent_workers=True)
     sample_dl = DataLoader(sample_ds, batch_size=1, collate_fn=make_sampling_collate(n=4))
-    data_shape = train_ds.shape # (T, C, H, W)
+    dummy_data = train_ds[0]
+
 
     # Load model and flow wrapper
-    model = load_model(cfg, data_shape, device)
+    model = load_model(cfg, dummy_data, device)
     model = load_flow(cfg, model)
     model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
 

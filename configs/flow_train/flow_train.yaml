@@ -7,6 +7,7 @@ dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
   max_frames: 32
   batch_size: 5
+  cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
 
 flow:
   type: linear
@@ -24,6 +25,7 @@ vae:
 trainer:
   lr: 1e-4
   loss_mask: pad
+  uncond_prob: 0.0
   kwargs:
     max_epochs: 1000
     precision: 32

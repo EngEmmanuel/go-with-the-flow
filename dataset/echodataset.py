@@ -125,9 +125,12 @@ class EchoDataset(Dataset):
             target_length=self.cfg.dataset.max_frames
         )
         z, cond = resampled[:, :self.shape[1], ...], resampled[:, self.shape[1]:, ...]
+
+        if self.cfg.dataset.get('cond_pad_mask', False):
+            cond = torch.cat([cond, (1. - pad_mask)], dim=1)
+
         outputs = {"z": z, "cond": cond}
 
-        # Mask for where to compute the loss
         if self.split == 'test':
             observed_mask, _ = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
             not_pad_mask = 1. - pad_mask[..., 0, 0, 0]
@@ -136,7 +139,8 @@ class EchoDataset(Dataset):
             outputs['not_pad_mask'] = not_pad_mask
             return outputs
 
-        # Only for training and validation
+
+        # Mask for where to compute the loss. Only for training and validation
         match self.cfg.trainer.get('loss_mask'):
             case None:
                 pass
@@ -157,6 +161,9 @@ class EchoDataset(Dataset):
         return encoder_hidden_states
 
     def _load_video(self, video_name: str):
+        '''
+        Load latent stats from disk, with optional caching.
+        '''
         if self.cache and video_name in self._cache:
             return self._cache[video_name]
 
@@ -164,9 +171,11 @@ class EchoDataset(Dataset):
         if 'std' not in stats:
             stats['std'] = stats['var'].sqrt()
             stats.pop('var', None)
+
         if self.cache:
             self._cache[video_name] = stats
         return stats
+
 
     def __getitem__(self, idx):
         row = self.df.iloc[idx]
