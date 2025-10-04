@@ -3,7 +3,7 @@ from __future__ import annotations
 import re
 import math
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -159,21 +159,27 @@ def compute_metrics_for_datasets(
     confidence: float = 0.95,
     resize: Optional[Tuple[int, int]] = None,
     device: Optional[torch.device] = None,
-    real_glob: str = '*',
-    fake_glob: str = '*',
+    real_glob: Union[str, List[str]] = '*',
+    fake_glob: Union[str, List[str]] = '*',
 ) -> Dict[str, Path]:
     real_root = inference_root / 'real'
     fake_root = inference_root / 'fake'
     output_dir = Path(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
 
-    paired_videos = get_real_and_fake_video_folders(
-        real_root=real_root,
-        fake_root=fake_root,
-        real_glob=real_glob,
-        fake_glob=fake_glob,
-    )
+    # Support multiple globs: normalize to lists
+    real_globs: List[str] = [real_glob] if isinstance(real_glob, str) else list(real_glob)
+    fake_globs: List[str] = [fake_glob] if isinstance(fake_glob, str) else list(fake_glob)
 
+    paired_videos: Dict[str, Tuple[Path, Path]] = {}
+    for (rg, fg) in zip(real_globs, fake_globs):
+        subset_pairs = get_real_and_fake_video_folders(
+            real_root=real_root,
+            fake_root=fake_root,
+            real_glob=rg,
+            fake_glob=fg,
+        )
+        paired_videos.update(subset_pairs)
     # Prepare optional LPIPS model
     want_lpips = any(m.lower() in ("lpips", "lpips_vgg") for m in metrics)
     lpips_net = _try_lpips_device(device) if want_lpips else None
@@ -182,9 +188,9 @@ def compute_metrics_for_datasets(
 
     # Save under fake_root/metric_results with a single YAML
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = Path(fake_root).parent / 'metric_results'
+    out_dir = Path(fake_root).parent / 'metric_results' / ts
     out_dir.mkdir(parents=True, exist_ok=True)
-    result_yaml = out_dir / f"metrics_{ts}.yaml"
+    result_yaml = out_dir / "metrics_summary.yaml"
 
     rows = []
     for real_name, (rdir, fdir) in paired_videos.items():
@@ -223,6 +229,8 @@ def compute_metrics_for_datasets(
                 lp.append(_lpips_vgg(lpips_net, x, y))
 
         row = {'video_pair': (rdir.name, fdir.name)}
+        row['ef'] = int(fdir.name.split('_ef')[-1].split('_')[0])
+        row['nmf'] = fdir.name.split('_nmf')[-1]
         if ssim:
             row['ssim'] = round(float(sum(ssim) / len(ssim)), 4)
         if psnr:
@@ -244,25 +252,29 @@ def compute_metrics_for_datasets(
             mean, lo, hi = _conf_int(vals, confidence)
             summary_rows.append({'metric': col, 'mean': round(mean, 4), 'ci_low': round(lo, 4), 'ci_high': round(hi, 4), 'n_videos': len(vals)})
 
-    # Prepare YAML payload
+    # Save per-video dataframe separately (CSV) instead of embedding in YAML
+    per_video_csv = out_dir / f"metrics_per_video.csv"
+    per_video_df.to_csv(per_video_csv, index=False)
+
+    # YAML now only stores config + summary (aggregate) information
     payload: Dict = {
         'config': {
             'real_root': str(real_root),
             'fake_root': str(fake_root),
-            'real_glob': real_glob,
-            'fake_glob': fake_glob,
+            'real_globs': real_globs,
+            'fake_globs': fake_globs,
             'which': list(metrics),
             'confidence': float(confidence),
             'resize': list(resize) if resize is not None else None,
             'timestamp': ts,
+            'per_video_csv': str(per_video_csv),
         },
         'summary': summary_rows,
-        'per_video': rows,
     }
-
     OmegaConf.save(config=OmegaConf.create(payload), f=str(result_yaml))
 
     return {
         'result_yaml': result_yaml,
+        'per_video_csv': per_video_csv,
         'out_dir': out_dir,
     }

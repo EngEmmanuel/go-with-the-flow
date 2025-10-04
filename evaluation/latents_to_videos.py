@@ -202,9 +202,9 @@ def convert_latents_directory(
     latents_dir: Path,
     run_dir: Path,
     repo_id: str,
+    query: dict,
     output_dir: Optional[Path] = None,
     types: Optional[List[str]] = None,
-    query: Optional[str] = None,
     fps: int = 16,
     fps_metadata_csv: Optional[Path] = None,
     decode_batch_size: int = 16,
@@ -226,7 +226,7 @@ def convert_latents_directory(
     types = types or ["framewise", "videowise"]
     latents_dir = Path(latents_dir)
     run_dir = Path(run_dir)
-    default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-2:])) / (query_to_filename(query) if query else 'all')
+    default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-2:])) / '/'.join(query['name'].split('_'))
     output_dir = Path(output_dir) if output_dir else default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -241,7 +241,7 @@ def convert_latents_directory(
     df = pd.read_csv(meta_path)
     if query:
         try:
-            df = df.query(query)
+            df = df.query(query['pattern'])
         except Exception as e:
             raise ValueError(f"Invalid query '{query}': {e}")
     if df.empty:

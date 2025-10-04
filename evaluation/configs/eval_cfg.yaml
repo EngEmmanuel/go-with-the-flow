@@ -3,8 +3,8 @@ defaults:
   - paths: ibme_cluster # Simply override in cli call
 
 #tasks: ['gen_latents', 'latents_to_videos','compute_metrics' ] #to enable metrics
-tasks: ['compute_metrics', 'latents_to_videos'] #to disable metrics
-#tasks: ['compute_metrics'] #to enable metrics
+#tasks: ['compute_metrics', 'latents_to_videos'] #to disable metrics
+tasks: ['compute_metrics'] #to enable metrics
 
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-29/17-19-35
@@ -18,19 +18,36 @@ test_ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
 n_ef_samples_in_range: 4  # Number of ef_gen samples per video in ef_gen_range
 
 # Latents to videos parameters
-latents_dir: ${run_dir}/evaluation/latents/2025-10-03/20-37-30 #null #
+time_and_date: '2025-10-03/20-37-30'  # Subdirectory under latents_dir to evaluate
+latents_dir: ${run_dir}/evaluation/latents/${time_and_date} #null #
 repo_id: HReynaud/EchoFlow
 types: [videowise]  # output types e.g., 'videowise' or 'framewise' or both
-query: rec_or_gen == "gen" # Query to filter which latents to convert to videos
-mode: gen # 'rec' or 'gen'
+queries: 
+  reconstruction_nmfmax: 'rec_or_gen == "rec" and n_missing_frames == "max"'
+  reconstruction_nmf75p: 'rec_or_gen == "rec" and n_missing_frames == "75p"'
+  reconstruction_nmf50p: 'rec_or_gen == "rec" and n_missing_frames == "50p"'
+  reconstruction_nmf25p: 'rec_or_gen == "rec" and n_missing_frames == "25p"'
+  generation_nmfmax: 'rec_or_gen == "gen" and n_missing_frames == "max"'
+  generation_nmf75p: 'rec_or_gen == "gen" and n_missing_frames == "75p"'
+  generation_nmf50p: 'rec_or_gen == "gen" and n_missing_frames == "50p"'
+  generation_nmf25p: 'rec_or_gen == "gen" and n_missing_frames == "25p"'
+
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
 
 # Metrics parameters (used when tasks includes 'compute_metrics')
+videos_root: ${run_dir}/evaluation/decoded_videos/${time_and_date} #null # Directory containing decoded videos; if null, will use output of latents_to_videos step
 metrics:
-  inference_root: ${run_dir}/evaluation/decoded_videos/2025-09-13/01-55-20/rec_or_gen_eq_rec/
-  real_glob: '*'            # glob pattern to match real videos
-  fake_glob: 'patient*nmfmax'            # glob pattern to match generated videos
+  inference_roots:
+    reconstruction_nmfmax: ${videos_root}/reconstruction/nmfmax
+    reconstruction_nmf75p: ${videos_root}/reconstruction/nmf75p
+  real_glob: ['*']            # glob pattern to match real videos
+  fake_glob: ['*']            # glob pattern to match generated videos
   which: [ssim, psnr, lpips_vgg]  # metrics to compute
-  stylegan_metrics: [fid50k_full, is50k, fvd2048_10f]
+  stylegan_metrics: [fid50k_full, fvd2048_10f]
   confidence: 0.95           # confidence level for CIs
   #resize: [112, 112]         # optional resize (H, W); set to null to keep native
+
+
+hydra:
+  run:
+    dir: ${paths.train_output_path}/hydra_eval_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

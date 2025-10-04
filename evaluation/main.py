@@ -15,6 +15,9 @@ from evaluation.latents_to_videos import convert_latents_directory
 from evaluation.metrics import compute_metrics_for_datasets
 from utils import select_device
 
+
+print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
+
 @hydra.main(version_base=None, config_path="configs", config_name="eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
@@ -61,9 +64,10 @@ def main(eval_cfg: DictConfig):
             device=device,
         )
 
+
     # Task: convert latents to videos
     if "latents_to_videos" in tasks:
-        print('\n'*2, '-'*150)
+        print_line_rule()
         print(f"[info] Converting latents to videos for run_dir: {run_dir}")
         if latents_dir is None:
             # Use provided directory from config if not generated in this run
@@ -72,89 +76,108 @@ def main(eval_cfg: DictConfig):
                 raise ValueError("latents_to_videos requested but no latents_dir available; set eval_cfg.latents_dir or include gen_latents in tasks.")
             latents_dir = Path(cfg_latents_dir)
 
-        decoded_videos_dir = convert_latents_directory(
-            real_data_path=Path(eval_cfg.real_data_path),
-            latents_dir=latents_dir,
-            run_dir=run_dir,
-            repo_id=eval_cfg.repo_id,
-            output_dir=None,
-            types=list(eval_cfg.types),
-            query=str(eval_cfg.query) if eval_cfg.get("query", None) is not None else None,
-            fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
-            device=device,
-        )
+        queries = eval_cfg.get("queries", None)
+        if queries is not None:
+            queries = OmegaConf.to_container(queries, resolve=True)
+        else:
+            queries = {"all": "True"}
+
+        decoded_videos_dirs = {}
+        for name, query in queries.items():
+            decoded_videos_dir = convert_latents_directory(
+                real_data_path=Path(eval_cfg.real_data_path),
+                latents_dir=latents_dir,
+                run_dir=run_dir,
+                repo_id=eval_cfg.repo_id,
+                output_dir=None,
+                types=list(eval_cfg.types),
+                query={'name':name,'pattern':query},
+                fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
+                device=device,
+            )
+            decoded_videos_dirs[name] = decoded_videos_dir
 
         print(f"[info] Wrote decoded videos under: {decoded_videos_dir}")
+
+
     # Task: compute metrics (keeps stylegan-v block, adds our metrics below)
     if "compute_metrics" in tasks:
-        print('\n'*2, '-'*150, flush=True)
-        print(f"[info] Computing metrics for run_dir: {run_dir}", flush=True)
-        # Our image-quality metrics with CIs
+        print_line_rule()
         metrics_cfg = eval_cfg.get('metrics')
+        print(f"[info] Computing metrics for run_dir: {run_dir}", flush=True)
 
-        assert metrics_cfg is not None, "eval_cfg.metrics must be set to compute metrics."
+        # Our image-quality metrics with CIs
         if decoded_videos_dir is None:
-            inference_root = Path(metrics_cfg.get('inference_root', None))
-            assert inference_root is not None, "eval_cfg.metrics.inference_root must be set if latents_to_videos is not run here."
+            inference_roots = metrics_cfg.get('inference_roots', None)
+            assert inference_roots is not None, "eval_cfg.metrics.inference_root must be set if latents_to_videos is not run here."
+            inference_roots = {name: Path(p) for name, p in inference_roots.items()}
         else:
-            inference_root = decoded_videos_dir 
+            inference_roots = decoded_videos_dirs
 
         real_glob = metrics_cfg.get('real_glob', '*')
         fake_glob = metrics_cfg.get('fake_glob', '*')
 
-        print(f"[metrics] inference root: {inference_root}", flush=True)
-        if metrics_cfg.get('stylegan_metrics', None) is not None:
-            print('\n'*2, '-'*150, flush=True)
+        # StyleGAN-V metrics
+        print(f"[metrics] inference roots: {inference_roots}", flush=True)
+        stylegan_metrics = metrics_cfg.get('stylegan_metrics', None)
+        if stylegan_metrics is not None:
+            print_line_rule()
             print(f"[info] Computing StyleGAN metrics", flush=True)
-            stylegan_metrics = metrics_cfg['stylegan_metrics']
             n_gpus = 1
-            for sub_dir in [f'framewise{x}' for x in ['', '_no_pad', '_generated', '_stitched']]:
-                inference_root_sub = inference_root / sub_dir
-                if not inference_root_sub.exists():
-                    continue
-                print('\n'*2,' '*6, '-*'*100, flush=True)
-                print(sub_dir.capitalize(), flush=True)
+            for name, inference_root in inference_roots.items():
+                print(f"\n[info] Computing StyleGAN metrics for: {name}", flush=True)
 
-                image_metrics = [x for x in stylegan_metrics if ('fvd' not in x and 'isv' not in x)]
-                video_metrics = [x for x in stylegan_metrics if ('fvd' in x or 'isv' in x)]
+                for sub_dir in [f'framewise{x}' for x in ['', '_no_pad', '_generated', '_stitched']]:
+                    inference_root_sub = inference_root / sub_dir
+                    if not inference_root_sub.exists():
+                        continue
+                    
+                    print_line_rule()
+                    print('\n', sub_dir.capitalize(), flush=True)
 
-                # Video metrics
-                if 'stitched' in sub_dir and len(video_metrics) > 0:
+                    image_metrics = [x for x in stylegan_metrics if ('fvd' not in x and 'isv' not in x)]
+                    video_metrics = [x for x in stylegan_metrics if ('fvd' in x or 'isv' in x)]
+
+                    # Video metrics
+                    if 'stitched' in sub_dir and len(video_metrics) > 0:
+                        run_stylegan_metrics(
+                            inference_root_sub=inference_root_sub,
+                            stylegan_metrics=','.join(video_metrics),
+                            n_gpus=n_gpus,
+                        )
+
+                    # Image metrics
                     run_stylegan_metrics(
                         inference_root_sub=inference_root_sub,
-                        stylegan_metrics=','.join(video_metrics),
+                        stylegan_metrics=','.join(image_metrics),
                         n_gpus=n_gpus,
                     )
 
-                # Image metrics
-                run_stylegan_metrics(
-                    inference_root_sub=inference_root_sub,
-                    stylegan_metrics=','.join(image_metrics),
-                    n_gpus=n_gpus,
-                )
 
+                    #TODO: Need a way to store the stylegan metrics output in the final yaml
+                    # Pairwise metrics with CIs
+                    pairwise_metrics = eval_cfg.metrics.get('which')
+                    if (pairwise_metrics is not None) and ('reconstruction' in name): # pairwise only makes sense for reconstruction
+                        print(f"\n[info] Computing pairwise metrics for: {name}", flush=True)
+                        
+                        confidence = float(metrics_cfg.get('confidence', 0.95))
+                        resize = metrics_cfg.get('resize', None)
+                        if resize is not None:
+                            resize = tuple(resize)
 
-                #TODO: Need a way to store the stylegan metrics output in the final yaml
-                # Pairwise metrics with CIs
-                if eval_cfg.metrics.get('which') is not None:
-                    assert eval_cfg.mode == 'rec', "Pairwise metrics can only be used to evaluate reconstruction ['rec'  mode]."
-                    metrics = metrics_cfg.which
-                    confidence = float(metrics_cfg.get('confidence', 0.95))
-                    resize = metrics_cfg.get('resize', None)
-                    if resize is not None:
-                        resize = tuple(resize)
-
-                    out_paths = compute_metrics_for_datasets(
-                        inference_root=inference_root_sub,
-                        metrics=metrics,
-                        output_dir=Path(eval_cfg.output_dir),
-                        confidence=confidence,
-                        resize=resize,
-                        device=device,
-                        real_glob=real_glob,
-                        fake_glob=fake_glob,
-                    )
-                    print(f"[metrics] Wrote summary YAML under: {out_paths['result_yaml']}")
+                        out_paths = compute_metrics_for_datasets(
+                            inference_root=inference_root_sub,
+                            metrics=pairwise_metrics,
+                            output_dir=Path(eval_cfg.output_dir),
+                            confidence=confidence,
+                            resize=resize,
+                            device=device,
+                            real_glob=real_glob,
+                            fake_glob=fake_glob,
+                        )
+                        print(f"[metrics] Wrote summary YAML under: {out_paths['result_yaml']}")
+                    else:
+                        print(f"[info] Skipping pairwise metrics for: {name}", flush=True)
 
 
 def run_stylegan_metrics(inference_root_sub, stylegan_metrics, n_gpus):
