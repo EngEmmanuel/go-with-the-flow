@@ -23,22 +23,6 @@ from vae.decode_latent_to_image import (
     _decode_frames_with_vae,
 )
 
-def query_to_filename(query: str) -> str:
-    mapping = {
-        '==': 'eq',
-        '!=': 'neq',
-        '>=': 'ge',
-        '<=': 'le',
-        '>': 'gt',
-        '<': 'lt',
-        '"': '',
-        "'": '',
-        ' ': '_',
-    }
-    for k, v in mapping.items():
-        query = query.replace(k, v)
-    return query
-
 
 def _load_cfg(run_dir: Path):
     cfg_path = run_dir / ".hydra" / "config.yaml"
@@ -369,20 +353,6 @@ def convert_latents_directory(
     df.to_csv(output_dir / 'metadata.csv', index=False)
     print(f"[done] Outputs saved under: {output_dir}")
     return output_dir
-
-
-'''
-Convert latent outputs to videos/frames"
---latent_dir", type=str, help="Directory with latent .pt files and metadata.csv")
---run_dir", type=str, help="Hydra run dir with .hydra/config.yaml (used to derive VAE subfolder)")
---repo_id", type=str, help="HF repo id for the VAE, e.g., HReynaud/EchoFlow")
---output-dir", type=str, default=None, help="Output directory (default: <latent_dir>/../decoded_eval)")
---types", type=str, nargs="*", choices=["framewise", "videowise"], default=["framewise", "videowise"], help="Output types")
---query", type=str, default=None, help="pandas query to filter metadata rows")
---fps", type=int, default=16, help="Default FPS when metadata CSV is not provided")
---fps-metadata-csv", type=str, default=None, help="CSV with video_name and FPS column to override default FPS")
---decode-batch-size", type=int, default=16, help="Frames per decode batch")
-'''
 
 
 if __name__ == "__main__":

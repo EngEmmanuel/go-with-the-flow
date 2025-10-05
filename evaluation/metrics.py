@@ -188,7 +188,7 @@ def compute_metrics_for_datasets(
 
     # Save under fake_root/metric_results with a single YAML
     ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = Path(fake_root).parent / 'metric_results' / ts
+    out_dir = Path(fake_root).parent / 'metric_results' #/ ts
     out_dir.mkdir(parents=True, exist_ok=True)
     result_yaml = out_dir / "metrics_summary.yaml"
 
@@ -228,7 +228,8 @@ def compute_metrics_for_datasets(
             if want_lp:
                 lp.append(_lpips_vgg(lpips_net, x, y))
 
-        row = {'video_pair': (rdir.name, fdir.name)}
+
+        row = {'real_video' : rdir.name, 'fake_video' : fdir.name}
         row['ef'] = int(fdir.name.split('_ef')[-1].split('_')[0])
         row['nmf'] = fdir.name.split('_nmf')[-1]
         if ssim:

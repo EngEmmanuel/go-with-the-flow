@@ -1,12 +1,15 @@
 import sys
+import json
 import hydra
 import subprocess
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from datetime import datetime
+from typing import Any, Dict
 from torch.utils.data import DataLoader
 from omegaconf import OmegaConf, DictConfig
+
 
 from dataset.echodataset import EchoDataset
 from dataset.util import make_sampling_collate
@@ -140,19 +143,20 @@ def main(eval_cfg: DictConfig):
 
                     # Video metrics
                     if 'stitched' in sub_dir and len(video_metrics) > 0:
-                        run_stylegan_metrics(
+                        reuslts_json = run_stylegan_metrics(
                             inference_root_sub=inference_root_sub,
                             stylegan_metrics=','.join(video_metrics),
                             n_gpus=n_gpus,
                         )
 
                     # Image metrics
-                    run_stylegan_metrics(
+                    results_json = run_stylegan_metrics(
                         inference_root_sub=inference_root_sub,
                         stylegan_metrics=','.join(image_metrics),
                         n_gpus=n_gpus,
                     )
 
+                    print('results_json:', results_json, flush=True)
 
                     #TODO: Need a way to store the stylegan metrics output in the final yaml
                     # Pairwise metrics with CIs
@@ -180,22 +184,38 @@ def main(eval_cfg: DictConfig):
                         print(f"[info] Skipping pairwise metrics for: {name}", flush=True)
 
 
-def run_stylegan_metrics(inference_root_sub, stylegan_metrics, n_gpus):
+
+def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus: int) -> Dict[str, Any]:
     cmd = [
         "python", "src/scripts/calc_metrics_for_dataset.py",
-        "--real_data_path", str(inference_root_sub / 'real'),
-        "--fake_data_path", str(inference_root_sub / 'fake'),
+        "--real_data_path", str(inference_root_sub / "real"),
+        "--fake_data_path", str(inference_root_sub / "fake"),
         "--gpus", str(n_gpus),
         "--resolution", "112",
         "--metrics", stylegan_metrics,
     ]
 
-    print('StyleGAN Metrics Terminal Command:', ' '.join(cmd))
     try:
-        out = subprocess.run(cmd, cwd='stylegan-v', check=True, capture_output=False, text=True)
-        print('StyleGAN Metrics Terminal Output:', out.stdout, '\n', out.stderr)
+        cp = subprocess.run(cmd, cwd="stylegan-v", text=True, capture_output=True, check=True)
     except subprocess.CalledProcessError as e:
-        print('StyleGAN Metrics Terminal Error:', e.stderr, '\n', e.stdout)
+        # Print what you would have seen, then re-raise
+        if e.stdout: print(e.stdout, end="")
+        if e.stderr: print(e.stderr, end="", file=sys.stderr)
+        raise
+
+    # Print everything you would have seen
+    if cp.stdout: print(cp.stdout, end="")
+    if cp.stderr: print(cp.stderr, end="", file=sys.stderr)
+
+    # Look for the last JSON line in stdout, then stderr
+    for stream in (cp.stdout, cp.stderr):
+        for line in reversed((stream or "").splitlines()):
+            s = line.strip()
+            if s.startswith('{"results":') and s.endswith('}'):
+                return json.loads(s)
+
+    raise RuntimeError('Couldn\'t find a JSON line starting with {"results": ... } in the output.')
+
     
 
 if __name__ == "__main__":
