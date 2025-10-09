@@ -2,7 +2,6 @@
 import torch
 import wandb 
 import hydra
-import torch.nn as nn
 from omegaconf import DictConfig, OmegaConf
 from torch import Tensor
 from torch.nn import Module, ModuleList
@@ -38,9 +37,7 @@ def select_device(force_cpu=False):
         return torch.device("cuda")
     return torch.device("cpu")
 
-#TODO Where is best to include the VAE?
 
-# Model conditioned on time is assumed True
 
 ### Trainer
 class FlowVideoGenerator(LightningModule):
@@ -82,13 +79,13 @@ class FlowVideoGenerator(LightningModule):
         if self.trainer.is_global_zero and is_sample_step:
             self.print(f"Sampling at step {self.global_step}")
 
-            self.sample()
+            self.mid_train_sample()
 
         # Increment counter
         self._val_counter += 1
 
     @torch.no_grad()
-    def sample(self, n_videos_per_sample=2):
+    def mid_train_sample(self, n_videos_per_sample=2):
 
         self.model.eval()
         sample_results = {}
@@ -123,14 +120,13 @@ class FlowVideoGenerator(LightningModule):
         return optimizer
     
     def maybe_drop_cond(self, batch):
-        ehs = batch.get('encoder_hidden_states', None)  # [B, 1]
-        if ehs is None or self.uncond_prob <= 0.0:
+        ehs = batch.get('encoder_hidden_states')  # [B, 1]
+        if self.uncond_prob <= 0.0:
             return batch
 
         B = ehs.shape[0]
         # boolean mask (no in-place ops)
         drop = (torch.rand(B, device=ehs.device) < self.uncond_prob)  # True => drop EF
-
         if drop.any():
             m = drop.view(B, 1)                               # [B,1], bool
             null = self.nullf_ehs.expand_as(ehs)               # shape-match; dtype/device handled by PL
@@ -149,11 +145,8 @@ def load_model(cfg, dummy_data, device):
     if isinstance(dummy_data, dict):
         C, T, H, W = dummy_data['x'].shape
         Cc, _, _, _ = dummy_data['cond_image'].shape
-    else:
-        _, C, H, W = dummy_data
-        Cc = C + 1
-        T =32
-    print('input shape:', (C+Cc, T, H, W))
+
+    print(f'input shape: {(C+Cc, T, H, W)}, with {Cc} cond channels')
 
     match (cfg.model.type).lower():
         case "unet":
@@ -179,7 +172,7 @@ def load_flow(cfg, model):
         case "linear":
             return LinearFlow(
                 model=model,
-                **cfg.flow.kwargs #TODO Double check it's sent in properly
+                **cfg.flow.kwargs
             )
 
 
@@ -247,8 +240,3 @@ def main(cfg: DictConfig):
 if __name__ == '__main__':
     device = select_device()
     main()
-
-
-
-
-#TODO Mask parameter?
