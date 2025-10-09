@@ -33,13 +33,14 @@ class EchoDataset(Dataset):
             n_sample_videos = kwargs['n_sample_videos']
             self.df = self.df.sample(n=min(n_sample_videos, len(self.df))).reset_index(drop=True)
 
-        # Get shape
-        self.shape = self.cfg.dataset.get('shape', None)
-        if self.shape is None:
-            stats = torch.load(self.data_path / f"{self.df.iloc[0]['video_name']}.pt")#, map_location='cpu')
-            self.shape = (self.cfg.dataset.max_frames,) + stats['mu'].shape[1:]
 
-        print(f"{split} Data Shape: {self.shape}")  # (T, C, H, W)
+        self.ef_column = kwargs.get('ef_column', 'EF_Area')
+
+        # Get data shape
+        stats = torch.load(self.data_path / f"{self.df.iloc[0]['video_name']}.pt")
+        self.shape = (self.cfg.dataset.max_frames,) + stats['mu'].shape[1:]
+
+        print(f"{split} Video Shape: {self.shape}")  # (T, C, H, W)
         print(f"{split} Dataset size: {len(self.df)}")
 
     def __len__(self):
@@ -191,7 +192,7 @@ class EchoDataset(Dataset):
         z = transformed_dict["z"].permute(1, 0, 2, 3).contiguous()
         cond = transformed_dict["cond"].permute(1, 0, 2, 3).contiguous()
 
-        ef = row['EF_Area'] / 100.0
+        ef = row[self.ef_column] / 100.0
         encoder_hidden_states = self.process_ef(ef, dtype=z.dtype)
 
         inputs = {
@@ -208,5 +209,10 @@ class EchoDataset(Dataset):
             inputs['video_name'] = row['video_name']
             inputs['observed_mask'] = transformed_dict.get('observed_mask')
             inputs['not_pad_mask'] = transformed_dict.get('not_pad_mask')
+
+            if 'target_ef' in self.df.columns:
+                inputs['target_ef_bin'] = row['target_ef_bin']
+
+            
 
         return inputs
