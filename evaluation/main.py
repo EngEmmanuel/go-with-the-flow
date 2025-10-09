@@ -7,19 +7,22 @@ sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from datetime import datetime
 from typing import Any, Dict
+from pprint import pprint
 from torch.utils.data import DataLoader
 from omegaconf import OmegaConf, DictConfig
 
 
 from dataset.echodataset import EchoDataset
 from dataset.util import make_sampling_collate
-from evaluation.functions import load_model_from_run, evaluate_to_latents
+from evaluation.functions import _get_run_config, load_model_from_run
+from evaluation.ef_evaluation_schemes import generate_dls_for_evaluation_scheme, run_inference
 from evaluation.latents_to_videos import convert_latents_directory
-from evaluation.metrics import compute_metrics_for_datasets
+from evaluation.metrics import compute_metrics_for_datasets, collect_metric_results
 from utils import select_device
 
 
 print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
+
 
 @hydra.main(version_base=None, config_path="configs", config_name="eval_cfg")
 def main(eval_cfg: DictConfig):
@@ -31,7 +34,7 @@ def main(eval_cfg: DictConfig):
     device = select_device()
     run_dir = Path(eval_cfg.run_dir)
 
-    latents_dir = None
+    latents_dirs = None
     decoded_videos_dir = None
     run_cfg = None
     model = None
@@ -40,67 +43,64 @@ def main(eval_cfg: DictConfig):
     if "gen_latents" in tasks:
         assert eval_cfg.get('latents_dir', None) is None, "eval_cfg.latents_dir should not be set if gen_latents is in tasks."
         print(f"[info] Generating latents for run_dir: {run_dir}")
-        model, run_cfg, _ = load_model_from_run(run_dir, ckpt_name=eval_cfg.get("ckpt_name", None))
 
-        # Build test loaders per n_missing_frames setting
-        test_ds_list = [
-            EchoDataset(run_cfg, split="test", cache=False, n_missing_frames=nmf)
-            for nmf in eval_cfg.test_n_missing_frames
-        ]
-        test_dl_list = [
-            DataLoader(
-                test_ds,
-                batch_size=1,
-                collate_fn=make_sampling_collate(
-                    eval_cfg.n_ef_samples_in_range,
-                    ef_gen_range=eval_cfg.test_ef_gen_range,
-                ),
-            )
-            for test_ds in test_ds_list
-        ]
+        
+        # Load model from run directory
+        run_cfg = _get_run_config(run_dir)
+        all_dataloaders = generate_dls_for_evaluation_scheme(run_cfg, eval_cfg)
 
-        latents_dir = evaluate_to_latents(
-            model=model,
-            test_dl_list=test_dl_list,
-            run_cfg=run_cfg,
-            eval_cfg=eval_cfg,
-            device=device,
+        dummy_data = next(iter(all_dataloaders.values()))[0].dataset[0]
+        model, _ = load_model_from_run(run_dir, dummy_data=dummy_data, ckpt_name=eval_cfg.get("ckpt_name"))
+
+        latents_dirs = run_inference(
+            eval_cfg=eval_cfg, 
+            run_cfg=run_cfg, 
+            model=model, 
+            device=device, 
+            dataloaders=all_dataloaders
         )
+
 
 
     # Task: convert latents to videos
     if "latents_to_videos" in tasks:
         print_line_rule()
         print(f"[info] Converting latents to videos for run_dir: {run_dir}")
-        if latents_dir is None:
+        if latents_dirs is None: # if tru, use cfg latents_dirs
             # Use provided directory from config if not generated in this run
-            cfg_latents_dir = eval_cfg.get("latents_dir", None)
-            if not cfg_latents_dir:
+            cfg_latents_dirs = eval_cfg.get("latents_dirs", None)
+            if not cfg_latents_dirs:
                 raise ValueError("latents_to_videos requested but no latents_dir available; set eval_cfg.latents_dir or include gen_latents in tasks.")
-            latents_dir = Path(cfg_latents_dir)
+            
+            #latents_dirs = [Path(p) for p in cfg_latents_dirs]
+            latents_dirs = {k: Path(v) for k,v in cfg_latents_dirs.items()}
 
-        queries = eval_cfg.get("queries", None)
-        if queries is not None:
-            queries = OmegaConf.to_container(queries, resolve=True)
-        else:
-            queries = {"all": "True"}
 
         decoded_videos_dirs = {}
-        for name, query in queries.items():
-            decoded_videos_dir = convert_latents_directory(
-                real_data_path=Path(eval_cfg.real_data_path),
-                latents_dir=latents_dir,
-                run_dir=run_dir,
-                repo_id=eval_cfg.repo_id,
-                output_dir=None,
-                types=list(eval_cfg.types),
-                query={'name':name,'pattern':query},
-                fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
-                device=device,
-            )
-            decoded_videos_dirs[name] = decoded_videos_dir
+        for scheme_name, latents_dir in latents_dirs.items():
+            assert latents_dir.exists(), f"Latents directory does not exist: {latents_dir}"
 
-        print(f"[info] Wrote decoded videos under: {decoded_videos_dir}")
+            queries = eval_cfg.get('queries', {}).get(scheme_name, None)
+            if queries is not None:
+                queries = OmegaConf.to_container(queries, resolve=True)
+            else:
+                queries = {"all": "True"}
+
+            for name, query in queries.items():
+                decoded_videos_dir = convert_latents_directory(
+                    real_data_path=Path(eval_cfg.real_data_path),
+                    latents_dir=latents_dir,
+                    run_dir=run_dir,
+                    repo_id=eval_cfg.repo_id,
+                    output_dir=None,
+                    types=list(eval_cfg.types),
+                    query={'name':name,'pattern':query},
+                    fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
+                    device=device,
+                )
+                decoded_videos_dirs[scheme_name][name] = decoded_videos_dir
+
+                print(f"[info] Wrote decoded videos under: {decoded_videos_dir}")
 
 
     # Task: compute metrics (keeps stylegan-v block, adds our metrics below)
@@ -109,11 +109,14 @@ def main(eval_cfg: DictConfig):
         metrics_cfg = eval_cfg.get('metrics')
         print(f"[info] Computing metrics for run_dir: {run_dir}", flush=True)
 
-        # Our image-quality metrics with CIs
         if decoded_videos_dir is None:
             inference_roots = metrics_cfg.get('inference_roots', None)
             assert inference_roots is not None, "eval_cfg.metrics.inference_root must be set if latents_to_videos is not run here."
-            inference_roots = {name: Path(p) for name, p in inference_roots.items()}
+
+            inference_roots = {
+                scheme: {name: Path(path) for name, path in group.items()} 
+                for scheme, group in inference_roots.items()
+            }
         else:
             inference_roots = decoded_videos_dirs
 
@@ -123,13 +126,18 @@ def main(eval_cfg: DictConfig):
         # StyleGAN-V metrics
         print(f"[metrics] inference roots: {inference_roots}", flush=True)
         stylegan_metrics = metrics_cfg.get('stylegan_metrics', None)
-        if stylegan_metrics is not None:
-            print_line_rule()
-            print(f"[info] Computing StyleGAN metrics", flush=True)
-            n_gpus = 1
-            for name, inference_root in inference_roots.items():
-                print(f"\n[info] Computing StyleGAN metrics for: {name}", flush=True)
 
+        print_line_rule()
+        print(f"[info] Computing StyleGAN metrics", flush=True)
+        n_gpus = 1
+
+        stylegan_results = {scheme: {'image_metrics': {}, 'video_metrics': {}} for scheme in inference_roots}
+        for scheme, group in inference_roots.items():
+            print(f"\n[info] Evaluation scheme: {scheme}", flush=True)
+            for name, inference_root in group.items():
+                print(f"\n[info] Computing StyleGAN metrics for: {scheme}:{name}", flush=True)
+
+                # Folder of frames and videos
                 for sub_dir in [f'framewise{x}' for x in ['', '_no_pad', '_generated', '_stitched']]:
                     inference_root_sub = inference_root / sub_dir
                     if not inference_root_sub.exists():
@@ -142,23 +150,24 @@ def main(eval_cfg: DictConfig):
                     video_metrics = [x for x in stylegan_metrics if ('fvd' in x or 'isv' in x)]
 
                     # Video metrics
+                    vid_results_json = {}
                     if 'stitched' in sub_dir and len(video_metrics) > 0:
-                        reuslts_json = run_stylegan_metrics(
+                        vid_results_json = run_stylegan_metrics(
                             inference_root_sub=inference_root_sub,
                             stylegan_metrics=','.join(video_metrics),
                             n_gpus=n_gpus,
                         )
+                        stylegan_results[scheme]['video_metrics'][sub_dir] = vid_results_json['results']
 
                     # Image metrics
-                    results_json = run_stylegan_metrics(
+                    img_results_json = run_stylegan_metrics(
                         inference_root_sub=inference_root_sub,
                         stylegan_metrics=','.join(image_metrics),
                         n_gpus=n_gpus,
                     )
+                    stylegan_results[scheme]['image_metrics'][sub_dir] = img_results_json['results']
 
-                    print('results_json:', results_json, flush=True)
 
-                    #TODO: Need a way to store the stylegan metrics output in the final yaml
                     # Pairwise metrics with CIs
                     pairwise_metrics = eval_cfg.metrics.get('which')
                     if (pairwise_metrics is not None) and ('reconstruction' in name): # pairwise only makes sense for reconstruction
@@ -178,10 +187,25 @@ def main(eval_cfg: DictConfig):
                             device=device,
                             real_glob=real_glob,
                             fake_glob=fake_glob,
+                            payload_kwargs={
+                                'stylegan_results': img_results_json['results'] | vid_results_json.get('results', {})
+                                },
                         )
                         print(f"[metrics] Wrote summary YAML under: {out_paths['result_yaml']}")
                     else:
                         print(f"[info] Skipping pairwise metrics for: {name}", flush=True)
+
+                pprint(stylegan_results)
+
+            for i in ['reconstruction', 'generation']:
+                dirr = Path(eval_cfg.videos_root) / scheme / i
+                if not dirr.exists():
+                    print(f"[info] Skipping metrics collection for {dirr} as it does not exist.")
+                collect_metric_results(
+                    dir_base=dirr / i,
+                    save_path=dirr / i,
+                    make_tables=True,
+                )
 
 
 
@@ -220,4 +244,5 @@ def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus
 
 if __name__ == "__main__":
     main()
-    #TODO: get stylegan working
+
+

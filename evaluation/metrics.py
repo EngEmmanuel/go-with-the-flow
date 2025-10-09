@@ -2,8 +2,10 @@ from __future__ import annotations
 
 import re
 import math
+import json
+import yaml
 from pathlib import Path
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import torch
 import torch.nn.functional as F
@@ -161,6 +163,7 @@ def compute_metrics_for_datasets(
     device: Optional[torch.device] = None,
     real_glob: Union[str, List[str]] = '*',
     fake_glob: Union[str, List[str]] = '*',
+    payload_kwargs: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, Path]:
     real_root = inference_root / 'real'
     fake_root = inference_root / 'fake'
@@ -270,6 +273,7 @@ def compute_metrics_for_datasets(
             'timestamp': ts,
             'per_video_csv': str(per_video_csv),
         },
+        **payload_kwargs,
         'summary': summary_rows,
     }
     OmegaConf.save(config=OmegaConf.create(payload), f=str(result_yaml))
@@ -279,3 +283,199 @@ def compute_metrics_for_datasets(
         'per_video_csv': per_video_csv,
         'out_dir': out_dir,
     }
+
+
+from typing import Dict, Any, Optional, Union, Tuple, List, Iterable
+from tabulate import tabulate  # pip install tabulate
+
+NMF_ROWS = ["nmf25p", "nmf50p", "nmf75p", "nmfmax"]
+
+def collect_metric_results(
+    dir_base: Path,
+    save_path: Optional[Union[str, Path]] = None,
+    *,
+    make_tables: bool = False,
+    table_format: str = "simple",     # "simple", "grid", "github", "fancy_grid", ...
+    tables_filename: str = "all_tables.txt",
+    sigfigs: int = 5
+) -> Tuple[Dict[str, Any], str]:
+    """
+    Collect metrics from any path matching:
+      <dir_base>/<nmf>/<variant>[/<another_level>/...]/metric_results/metrics_summary.yaml
+
+    - Ignores timestamped subfolders (we only accept files directly inside metric_results/).
+    - 'summary' is converted from a list into a dict keyed by metric.
+    - Output is nested by the path segments between <nmf> and 'metric_results':
+        data[nmf][variant][another_level]... = {stylegan_results, summary, path}
+    - If `save_path` is provided, writes nested YAML there (or to <save_path>/all_metrics.yaml if a directory).
+    - If `make_tables=True`, writes a single text file with all per-variant-path tables
+      (rows = NMF_ROWS; columns = union of metrics; values = stylegan metric or summary['mean']).
+
+    Returns:
+        (nested_results_dict, combined_tables_text)
+    """
+    dir_base = dir_base.resolve()
+    out: Dict[str, Any] = {}
+
+    # -------- scan for YAMLs (ignore timestamped subfolders) --------
+    for yml in dir_base.rglob("metrics_summary.yaml"):
+        if yml.parent.name != "metric_results":
+            continue
+        try:
+            rel = yml.relative_to(dir_base)
+        except ValueError:
+            continue
+
+        parts = rel.parts
+        # Expect: [nmf, <variant and optional deeper keys...>, 'metric_results', 'metrics_summary.yaml']
+        if "metric_results" not in parts:
+            continue
+        mr_idx = parts.index("metric_results")
+        if mr_idx < 2:  # need at least nmf + one variant key
+            continue
+
+        nmf = parts[0]
+        variant_keys = list(parts[1:mr_idx])  # one or more segments
+
+        with open(yml, "r", encoding="utf-8") as f:
+            data = yaml.safe_load(f) or {}
+
+        stylegan = data.get("stylegan_results") or {}
+        summary_list = data.get("summary") or []
+
+        # list[{metric, mean, ...}] -> dict[metric] = {...}
+        summary_dict: Dict[str, Dict[str, Any]] = {}
+        for row in summary_list:
+            if isinstance(row, dict) and row.get("metric"):
+                key = row["metric"]
+                summary_dict[key] = {k: v for k, v in row.items() if k != "metric"}
+
+        # Insert into nested dict: out[nmf][variant][...]
+        leaf = {
+            "stylegan_results": stylegan,
+            "summary": summary_dict,
+            "path": str(yml),
+        }
+        _nested_set(out, [nmf, *variant_keys], leaf)
+
+    # -------- save nested YAML (optional) --------
+    combined_tables_text = ""
+    out_dir_for_tables: Optional[Path] = None
+    if save_path is not None:
+        sp = Path(save_path)
+        if sp.exists() and sp.is_dir():
+            sp = sp / "all_metrics.yaml"
+        sp.parent.mkdir(parents=True, exist_ok=True)
+        with open(sp, "w", encoding="utf-8") as f:
+            yaml.safe_dump(out, f, sort_keys=False)
+        out_dir_for_tables = sp.parent
+
+    # -------- build tables & write one combined .txt (optional) --------
+    if make_tables:
+        combined_tables_text = _build_all_tables_text(
+            out, table_format=table_format, sigfigs=sigfigs
+        )
+        if out_dir_for_tables is not None:
+            (out_dir_for_tables / tables_filename).write_text(
+                combined_tables_text, encoding="utf-8"
+            )
+
+    return out, combined_tables_text
+
+
+# ---------------- helpers ----------------
+
+def _nested_set(d: Dict[str, Any], keys: List[str], value: Dict[str, Any]) -> None:
+    """Insert value into nested dict along keys, creating intermediate dicts as needed."""
+    cur = d
+    for k in keys[:-1]:
+        cur = cur.setdefault(k, {})
+    cur[keys[-1]] = value
+
+def _sf(val: Any, sigfigs: int) -> str:
+    if val is None:
+        return "-"
+    try:
+        return f"{float(val):.{sigfigs}g}"
+    except Exception:
+        return str(val)
+
+def _iter_variant_paths(subtree: Dict[str, Any], prefix: Tuple[str, ...] = ()) -> Iterable[Tuple[str, ...]]:
+    """
+    Yield variant-paths (as tuples of strings) below a single nmf subtree.
+    A leaf is identified by having 'stylegan_results' in the dict.
+    """
+    if isinstance(subtree, dict) and "stylegan_results" in subtree:
+        yield prefix
+        return
+    if isinstance(subtree, dict):
+        for k, v in subtree.items():
+            yield from _iter_variant_paths(v, prefix + (k,))
+
+def _get_node_at_path(subtree: Dict[str, Any], path: Tuple[str, ...]) -> Optional[Dict[str, Any]]:
+    cur = subtree
+    for p in path:
+        if not isinstance(cur, dict) or p not in cur:
+            return None
+        cur = cur[p]
+    if isinstance(cur, dict) and "stylegan_results" in cur:
+        return cur
+    return None
+
+def _build_all_tables_text(
+    data: Dict[str, Any],
+    *,
+    table_format: str = "simple",
+    sigfigs: int = 5
+) -> str:
+    """
+    Build tables per 'variant-path' (e.g., 'framewise', 'framewise_no_pad', or 'framewise/clipA'),
+    concatenated into a single text blob with headers. Rows are NMF_ROWS; columns are the union of
+    metric names across nmf entries; values come from stylegan_results (direct) or summary['mean'].
+    """
+    # Collect all variant-paths across all nmf branches
+    all_paths: set[Tuple[str, ...]] = set()
+    for nmf, subtree in data.items():
+        if nmf not in NMF_ROWS:
+            continue
+        for path in _iter_variant_paths(subtree):
+            all_paths.add(path)
+
+    chunks: List[str] = []
+    for path in sorted(all_paths):
+        title = " / ".join(path) if path else "(root)"
+        # Determine columns (union across nmf rows for this path)
+        metrics_set = set()
+        for nmf in NMF_ROWS:
+            node = _get_node_at_path(data.get(nmf, {}), path)
+            if not node:
+                continue
+            metrics_set.update(node.get("stylegan_results", {}).keys())
+            metrics_set.update(node.get("summary", {}).keys())
+        metrics = sorted(metrics_set)
+
+        # Build table rows
+        rows = []
+        for nmf in NMF_ROWS:
+            node = _get_node_at_path(data.get(nmf, {}), path)
+            row = [nmf]
+            for m in metrics:
+                cell = "-"
+                if node:
+                    if m in node.get("stylegan_results", {}):
+                        cell = _sf(node["stylegan_results"][m], sigfigs)
+                    elif m in node.get("summary", {}):
+                        cell = _sf(node["summary"][m].get("mean"), sigfigs)
+                row.append(cell)
+            rows.append(row)
+
+        headers = ["nmf"] + metrics
+        table_str = tabulate(rows, headers=headers, tablefmt=table_format, stralign="right")
+        chunks.append(f"=== {title} ===")
+        chunks.append(table_str)
+
+    return "\n\n".join(chunks)
+
+
+
+

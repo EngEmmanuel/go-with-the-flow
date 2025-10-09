@@ -100,6 +100,7 @@ def _resample_T3HW(frames_T3HW: torch.Tensor, target_length: int) -> torch.Tenso
 def _make_video_with_ffmpeg(frames_dir: Path, out_path: Path, fps: float) -> bool:
     """Create a video from PNG frames using ffmpeg's glob pattern.
 
+    Build a video from frames named frame_0.png, frame_1.png, ... (contiguous from 0).
     Returns True on success, False otherwise.
     """
     out_path.parent.mkdir(parents=True, exist_ok=True)
@@ -107,17 +108,17 @@ def _make_video_with_ffmpeg(frames_dir: Path, out_path: Path, fps: float) -> boo
     if len(list(frames_dir.glob("*.png"))) == 0:
         print(f"[warn] No PNG frames found in {frames_dir}, skipping video creation")
         return False
-    # Use an absolute glob pattern so we don't rely on cwd
-    input_pattern = str(frames_dir / "*.png")
+    out_path.parent.mkdir(parents=True, exist_ok=True)
     cmd = [
-        "ffmpeg",
-        "-y",
+        "ffmpeg", "-y",
         "-loglevel", "error",
         "-framerate", str(fps),
-        "-pattern_type", "glob",
-        "-i", input_pattern,
+        "-start_number", "0",
+        "-i", str((frames_dir / "frame_%d.png").as_posix()),
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
+        "-vsync", "cfr",
+        "-r", str(fps),
         str(out_path),
     ]
     try:
@@ -210,7 +211,7 @@ def convert_latents_directory(
     types = types or ["framewise", "videowise"]
     latents_dir = Path(latents_dir)
     run_dir = Path(run_dir)
-    default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-2:])) / '/'.join(query['name'].split('_'))
+    default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-3:])) / '/'.join(query['name'].split('_'))
     output_dir = Path(output_dir) if output_dir else default_output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
