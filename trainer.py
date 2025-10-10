@@ -56,7 +56,7 @@ class FlowVideoGenerator(LightningModule):
 
         self._val_counter = 0
 
-        # learned 1-D null EF
+        # learned 1-D null EF for CFG
         self.null_ehs = torch.nn.Parameter(torch.zeros(1, 1))  # shape [1,1]
         self.uncond_prob = float(cfg.trainer.get('uncond_prob', 0.0))
 
