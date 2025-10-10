@@ -1489,7 +1489,7 @@ class UNetSTIC(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
                 If `return_dict` is True, an [`~models.unet_slatio_temporal.UNetSTICOutput`] is
                 returned, otherwise a `tuple` is returned where the first element is the sample tensor.
         """
-
+        
         sample = torch.cat([x, cond_image], dim=1)  # B C+1 T H W
 
         # pad to multiple of 2**n

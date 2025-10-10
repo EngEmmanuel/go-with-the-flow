@@ -5,6 +5,7 @@ from torch import Tensor
 from torchdiffeq import odeint
 from einops import rearrange, repeat
 from my_src.custom_loss import MaskedMSELoss
+from pprint import pprint
 # Code adapted from https://github.com/lucidrains/rectified-flow-pytorch/blob/main/rectified_flow_pytorch/rectified_flow.py
 
 def identity(t):
@@ -61,6 +62,7 @@ class LinearFlow(Module):
         data_shape: tuple[int, ...] | None = None,
         cond_image=None, 
         mask=None,
+        guidance_scale: float = 1.0,
         odeint_kwargs: dict = dict(
             atol = 1e-5,
             rtol = 1e-5,
@@ -69,24 +71,46 @@ class LinearFlow(Module):
         use_ema: bool = False,
         **model_kwargs
     ):
-
+        
+        model = self.model
         data_shape = default(data_shape, self.data_shape)
 
         maybe_clip = (lambda t: t.clamp_(*self.clip_values)) if self.clip_values is not None else identity
         maybe_clip_flow = (lambda t: t.clamp_(*self.clip_flow_values)) if self.clip_flow_values is not None else identity
 
-        model = self.model
+        uncond_ehs = getattr(self, "null_ehs", None)
+        if uncond_ehs is not None:
+            uncond_ehs = uncond_ehs.expand(batch_size, -1, -1)
+
+        def _predict(x, t, ehs):
+            return self.predict_flow(
+                model,
+                x,
+                times=t,
+                encoder_hidden_states=ehs,
+                cond_image=cond_image,
+                mask=mask,
+                **model_kwargs,
+            )
 
         def ode_fn(t, x):
-             #TODO Clip flow values
             x = maybe_clip(x)
 
-            output = self.predict_flow(model, x, times=t, encoder_hidden_states=encoder_hidden_states, cond_image=cond_image, mask=mask, **model_kwargs)
+            if guidance_scale <= 1.0: # No CFG
+                flow = _predict(x, t, encoder_hidden_states)
+            else:
+                if uncond_ehs is None:
+                    raise ValueError(
+                        "guidance_scale > 1.0 requires a learned null EF embedding. "
+                        "Either this model was not trained for CFG or you need to" \
+                        "Attach `null_ehs` to the flow (e.g., during checkpoint load)."
+                    )
 
-            flow = output
-            flow = maybe_clip_flow(flow)
+                flow_cond = _predict(x, t, encoder_hidden_states)
+                flow_uncond = _predict(x, t, uncond_ehs)
+                flow = flow_uncond + guidance_scale * (flow_cond - flow_uncond)
 
-            return flow
+            return maybe_clip_flow(flow)
 
         # Start with random gaussian noise - y0
         noise = default(noise, torch.randn(batch_size, *data_shape, device=self.device))
