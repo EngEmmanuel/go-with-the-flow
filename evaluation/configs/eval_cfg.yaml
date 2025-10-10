@@ -7,26 +7,27 @@ tasks: ['gen_latents', 'latents_to_videos','compute_metrics' ] #to enable metric
 #tasks: ['compute_metrics'] #to enable metrics
 
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
-run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-26/09-09-34
+run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-20/22-39-38
 ckpt_name: last.ckpt
 
 # Debugging
-dataset_kwargs:
-  n_sample_videos: 4  # Query to filter dataset, e.g. 'n_missing_frames == "max" and target_ef_bin == 1'; null to use all
+#dataset_kwargs:
+#  n_sample_videos: 20  # Query to filter dataset, e.g. 'n_missing_frames == "max" and target_ef_bin == 1'; null to use all
 
 output_dir: ${run_dir}/evaluation
 
 # Inference parameters
 inference_schemes:
+  ef_histogram_matching:
+    plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan
+    batch_size: 16
+    
   ef_samples_in_range:
     ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
     n_ef_samples: 4  # Number of ef_gen samples per video in ef_gen_range
 
-  ef_histogram_matching:
-    plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan
-    batch_size: 4
-
-
+model_sample_kwargs:
+  guidance_scale: 5  # Classifier-free guidance scale; set to 1.0 for no guidance
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
 
@@ -41,17 +42,36 @@ repo_id: HReynaud/EchoFlow
 types: [videowise]  # output types e.g., 'videowise' or 'framewise' or both
 queries:
   ef_histogram_matching:
+    generation_nmfmax_bin0: 'n_missing_frames == "max" and target_ef_bin == 0'
     generation_nmfmax_bin1: 'n_missing_frames == "max" and target_ef_bin == 1'
+    generation_nmfmax_bin2: 'n_missing_frames == "max" and target_ef_bin == 2'
+    generation_nmfmax_bin3: 'n_missing_frames == "max" and target_ef_bin == 3'
+    generation_nmfmax_bin4: 'n_missing_frames == "max" and target_ef_bin == 4'
+    generation_nmf75p_bin0: 'n_missing_frames == "75p" and target_ef_bin == 0'
     generation_nmf75p_bin1: 'n_missing_frames == "75p" and target_ef_bin == 1'
+    generation_nmf75p_bin2: 'n_missing_frames == "75p" and target_ef_bin == 2'
+    generation_nmf75p_bin3: 'n_missing_frames == "75p" and target_ef_bin == 3'
+    generation_nmf75p_bin4: 'n_missing_frames == "75p" and target_ef_bin == 4'
+    generation_nmf50p_bin0: 'n_missing_frames == "50p" and target_ef_bin == 0'
+    generation_nmf50p_bin1: 'n_missing_frames == "50p" and target_ef_bin == 1'
+    generation_nmf50p_bin2: 'n_missing_frames == "50p" and target_ef_bin == 2'
+    generation_nmf50p_bin3: 'n_missing_frames == "50p" and target_ef_bin == 3'
+    generation_nmf50p_bin4: 'n_missing_frames == "50p" and target_ef_bin == 4'
+    generation_nmf25p_bin0: 'n_missing_frames == "25p" and target_ef_bin == 0'
+    generation_nmf25p_bin1: 'n_missing_frames == "25p" and target_ef_bin == 1'
+    generation_nmf25p_bin2: 'n_missing_frames == "25p" and target_ef_bin == 2'
+    generation_nmf25p_bin3: 'n_missing_frames == "25p" and target_ef_bin == 3'
+    generation_nmf25p_bin4: 'n_missing_frames == "25p" and target_ef_bin == 4'
+
   ef_samples_in_range:
     reconstruction_nmfmax: 'rec_or_gen == "rec" and n_missing_frames == "max"'
     reconstruction_nmf75p: 'rec_or_gen == "rec" and n_missing_frames == "75p"'
-    #reconstruction_nmf50p: 'rec_or_gen == "rec" and n_missing_frames == "50p"'
-    #reconstruction_nmf25p: 'rec_or_gen == "rec" and n_missing_frames == "25p"'
-    #generation_nmfmax: 'rec_or_gen == "gen" and n_missing_frames == "max"'
-    #generation_nmf75p: 'rec_or_gen == "gen" and n_missing_frames == "75p"'
-    #generation_nmf50p: 'rec_or_gen == "gen" and n_missing_frames == "50p"'
-    #generation_nmf25p: 'rec_or_gen == "gen" and n_missing_frames == "25p"'
+    reconstruction_nmf50p: 'rec_or_gen == "rec" and n_missing_frames == "50p"'
+    reconstruction_nmf25p: 'rec_or_gen == "rec" and n_missing_frames == "25p"'
+    generation_nmfmax: 'rec_or_gen == "gen" and n_missing_frames == "max"'
+    generation_nmf75p: 'rec_or_gen == "gen" and n_missing_frames == "75p"'
+    generation_nmf50p: 'rec_or_gen == "gen" and n_missing_frames == "50p"'
+    generation_nmf25p: 'rec_or_gen == "gen" and n_missing_frames == "25p"'
   
 
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
@@ -60,13 +80,37 @@ fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV 
 metrics:
   inference_roots:
     ef_histogram_matching: 
+      generation_nmfmax_bin0: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin0
       generation_nmfmax_bin1: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin1
+      generation_nmfmax_bin2: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin2
+      generation_nmfmax_bin3: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin3
+      generation_nmfmax_bin4: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin4
+      generation_nmf75p_bin0: ${videos_root}/ef_histogram_matching/generation/nmf75p/bin0
       generation_nmf75p_bin1: ${videos_root}/ef_histogram_matching/generation/nmf75p/bin1
+      generation_nmf75p_bin2: ${videos_root}/ef_histogram_matching/generation/nmf75p/bin2
+      generation_nmf75p_bin3: ${videos_root}/ef_histogram_matching/generation/nmf75p/bin3
+      generation_nmf75p_bin4: ${videos_root}/ef_histogram_matching/generation/nmf75p/bin4
+      generation_nmf50p_bin0: ${videos_root}/ef_histogram_matching/generation/nmf50p/bin0
+      generation_nmf50p_bin1: ${videos_root}/ef_histogram_matching/generation/nmf50p/bin1
+      generation_nmf50p_bin2: ${videos_root}/ef_histogram_matching/generation/nmf50p/bin2
+      generation_nmf50p_bin3: ${videos_root}/ef_histogram_matching/generation/nmf50p/bin3
+      generation_nmf50p_bin4: ${videos_root}/ef_histogram_matching/generation/nmf50p/bin4
+      generation_nmf25p_bin0: ${videos_root}/ef_histogram_matching/generation/nmf25p/bin0
+      generation_nmf25p_bin1: ${videos_root}/ef_histogram_matching/generation/nmf25p/bin1
+      generation_nmf25p_bin2: ${videos_root}/ef_histogram_matching/generation/nmf25p/bin2
+      generation_nmf25p_bin3: ${videos_root}/ef_histogram_matching/generation/nmf25p/bin3
+      generation_nmf25p_bin4: ${videos_root}/ef_histogram_matching/generation/nmf25p/bin4
+
     ef_samples_in_range:
       reconstruction_nmfmax: ${videos_root}/ef_samples_in_range/reconstruction/nmfmax
       reconstruction_nmf75p: ${videos_root}/ef_samples_in_range/reconstruction/nmf75p
-      #reconstruction_nmf50p: ${videos_root}/ef_samples_in_range/reconstruction/nmf50p
-      #reconstruction_nmf25p: ${videos_root}/ef_samples_in_range/reconstruction/nmf25p
+      reconstruction_nmf50p: ${videos_root}/ef_samples_in_range/reconstruction/nmf50p
+      reconstruction_nmf25p: ${videos_root}/ef_samples_in_range/reconstruction/nmf25p
+      generation_nmfmax: ${videos_root}/ef_samples_in_range/generation/nmfmax
+      generation_nmf75p: ${videos_root}/ef_samples_in_range/generation/nmf75p
+      generation_nmf50p: ${videos_root}/ef_samples_in_range/generation/nmf50p
+      generation_nmf25p: ${videos_root}/ef_samples_in_range/generation/nmf25p
+
   real_glob: ['*']            # glob pattern to match real videos
   fake_glob: ['*']            # glob pattern to match generated videos
   which: [ssim, psnr, lpips_vgg]  # metrics to compute

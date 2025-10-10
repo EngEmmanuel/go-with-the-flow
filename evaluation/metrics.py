@@ -164,6 +164,7 @@ def compute_metrics_for_datasets(
     real_glob: Union[str, List[str]] = '*',
     fake_glob: Union[str, List[str]] = '*',
     payload_kwargs: Optional[Dict[str, Any]] = None,
+    just_save_payload: bool = False,
 ) -> Dict[str, Path]:
     real_root = inference_root / 'real'
     fake_root = inference_root / 'fake'
@@ -174,15 +175,16 @@ def compute_metrics_for_datasets(
     real_globs: List[str] = [real_glob] if isinstance(real_glob, str) else list(real_glob)
     fake_globs: List[str] = [fake_glob] if isinstance(fake_glob, str) else list(fake_glob)
 
-    paired_videos: Dict[str, Tuple[Path, Path]] = {}
-    for (rg, fg) in zip(real_globs, fake_globs):
-        subset_pairs = get_real_and_fake_video_folders(
-            real_root=real_root,
-            fake_root=fake_root,
-            real_glob=rg,
-            fake_glob=fg,
-        )
-        paired_videos.update(subset_pairs)
+    if not just_save_payload:
+        paired_videos: Dict[str, Tuple[Path, Path]] = {}
+        for (rg, fg) in zip(real_globs, fake_globs):
+            subset_pairs = get_real_and_fake_video_folders(
+                real_root=real_root,
+                fake_root=fake_root,
+                real_glob=rg,
+                fake_glob=fg,
+            )
+            paired_videos.update(subset_pairs)
     # Prepare optional LPIPS model
     want_lpips = any(m.lower() in ("lpips", "lpips_vgg") for m in metrics)
     lpips_net = _try_lpips_device(device) if want_lpips else None
@@ -196,52 +198,53 @@ def compute_metrics_for_datasets(
     result_yaml = out_dir / "metrics_summary.yaml"
 
     rows = []
-    for real_name, (rdir, fdir) in paired_videos.items():
-        rframes = sorted(rdir.glob('*.png'))
-        fframes = sorted(fdir.glob('*.png'))
-        # Use overlapping frame count only
-        n = min(len(fframes), len(rframes))
-        if n == 0:
-            continue
+    if not just_save_payload:
+        for real_name, (rdir, fdir) in paired_videos.items():
+            rframes = sorted(rdir.glob('*.png'))
+            fframes = sorted(fdir.glob('*.png'))
+            # Use overlapping frame count only
+            n = min(len(fframes), len(rframes))
+            if n == 0:
+                continue
 
-        # Buckets for metrics (only _all variant retained)
-        ssim: List[float] = []
-        psnr: List[float] = []
-        lp: List[float] = []
+            # Buckets for metrics (only _all variant retained)
+            ssim: List[float] = []
+            psnr: List[float] = []
+            lp: List[float] = []
 
-        want_ssim = 'ssim' in [m.lower() for m in metrics]
-        want_psnr = 'psnr' in [m.lower() for m in metrics]
-        want_lp = want_lpips and lpips_net is not None
+            want_ssim = 'ssim' in [m.lower() for m in metrics]
+            want_psnr = 'psnr' in [m.lower() for m in metrics]
+            want_lp = want_lpips and lpips_net is not None
 
-        for i in range(n):
-            fp = fframes[i]
-            rp = rframes[i]
-            y = _load_image(fp, resize=resize, device=device)
-            x = _load_image(rp, resize=resize, device=device)
-            if x.shape != y.shape:
-                h = min(x.shape[1], y.shape[1])
-                w = min(x.shape[2], y.shape[2])
-                x = F.interpolate(x.unsqueeze(0), size=(h, w), mode='bicubic', align_corners=False).squeeze(0)
-                y = F.interpolate(y.unsqueeze(0), size=(h, w), mode='bicubic', align_corners=False).squeeze(0)
+            for i in range(n):
+                fp = fframes[i]
+                rp = rframes[i]
+                y = _load_image(fp, resize=resize, device=device)
+                x = _load_image(rp, resize=resize, device=device)
+                if x.shape != y.shape:
+                    h = min(x.shape[1], y.shape[1])
+                    w = min(x.shape[2], y.shape[2])
+                    x = F.interpolate(x.unsqueeze(0), size=(h, w), mode='bicubic', align_corners=False).squeeze(0)
+                    y = F.interpolate(y.unsqueeze(0), size=(h, w), mode='bicubic', align_corners=False).squeeze(0)
 
-            if want_ssim:
-                ssim.append(_ssim(x, y))
-            if want_psnr:
-                psnr.append(_psnr(x, y))
-            if want_lp:
-                lp.append(_lpips_vgg(lpips_net, x, y))
+                if want_ssim:
+                    ssim.append(_ssim(x, y))
+                if want_psnr:
+                    psnr.append(_psnr(x, y))
+                if want_lp:
+                    lp.append(_lpips_vgg(lpips_net, x, y))
 
 
-        row = {'real_video' : rdir.name, 'fake_video' : fdir.name}
-        row['ef'] = int(fdir.name.split('_ef')[-1].split('_')[0])
-        row['nmf'] = fdir.name.split('_nmf')[-1]
-        if ssim:
-            row['ssim'] = round(float(sum(ssim) / len(ssim)), 4)
-        if psnr:
-            row['psnr'] = round(float(sum(psnr) / len(psnr)), 4)
-        if want_lpips:
-            row['lpips_vgg'] = round(float(sum(lp) / len(lp)), 4) if lp else float('nan')
-        rows.append(row)
+            row = {'real_video' : rdir.name, 'fake_video' : fdir.name}
+            row['ef'] = int(fdir.name.split('_ef')[-1].split('_')[0])
+            row['nmf'] = fdir.name.split('_nmf')[-1]
+            if ssim:
+                row['ssim'] = round(float(sum(ssim) / len(ssim)), 4)
+            if psnr:
+                row['psnr'] = round(float(sum(psnr) / len(psnr)), 4)
+            if want_lpips:
+                row['lpips_vgg'] = round(float(sum(lp) / len(lp)), 4) if lp else float('nan')
+            rows.append(row)
 
     per_video_df = pd.DataFrame(rows)
 
@@ -256,7 +259,7 @@ def compute_metrics_for_datasets(
             mean, lo, hi = _conf_int(vals, confidence)
             summary_rows.append({'metric': col, 'mean': round(mean, 4), 'ci_low': round(lo, 4), 'ci_high': round(hi, 4), 'n_videos': len(vals)})
 
-    # Save per-video dataframe separately (CSV) instead of embedding in YAML
+    # Save per-video dataframe separately (CSV)
     per_video_csv = out_dir / f"metrics_per_video.csv"
     per_video_df.to_csv(per_video_csv, index=False)
 

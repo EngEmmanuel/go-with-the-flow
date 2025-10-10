@@ -9,7 +9,7 @@ import torch
 from omegaconf import OmegaConf
 
 from utils.util import select_device
-from trainer import load_model, load_flow
+from trainer import load_model, load_flow, FlowVideoGenerator
 
 def _find_checkpoint(ckpt_dir: Path, ckpt_name: Optional[str] = None) -> Path:
 	if ckpt_name:
@@ -70,6 +70,8 @@ def load_model_from_run(run_dir: str | Path, dummy_data: dict, ckpt_name: Option
 	# FlowVideoGenerator saved as LightningModule with attribute 'model'
 	# Strip leading 'model.' to match our flow wrapper keys
 	cleaned = {k.split("model.", 1)[1] if k.startswith("model.") else k: v for k, v in state_dict.items()}
+	if 'null_ehs' in cleaned:
+		model.null_ehs = torch.nn.Parameter(cleaned["null_ehs"])
 
 	# Load only matching keys
 	missing, unexpected = model.load_state_dict(cleaned, strict=False)

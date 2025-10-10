@@ -1,3 +1,3 @@
 project_path: /users/spet4299/code/TEE/flow-matching/go-with-the-flow
-data_path: ${project_path}/data
+data_path: /users/spet4299/code/TEE/flow-matching/go-with-the-flow/data
 train_output_path: /users/spet4299/code/TEE/flow-matching/go-with-the-flow/outputs

@@ -25,8 +25,8 @@ def ef_histogram_matching(run_cfg, eval_cfg) -> List[DataLoader]:
     scheme_args = eval_cfg.inference_schemes.get("ef_histogram_matching", {})
 
     plan_path = scheme_args["plan_path"] 
-    batch_size = scheme_args.get("batch_size", eval_cfg.get("batch_size", DEFAULT_BATCH_SIZE))
-    num_workers = scheme_args.get("num_workers", eval_cfg.get("num_workers", DEFAULT_NUM_WORKERS))
+    batch_size = scheme_args.get("batch_size", DEFAULT_BATCH_SIZE)
+    num_workers = scheme_args.get("num_workers", DEFAULT_NUM_WORKERS)
 
     plan_df = pd.read_csv(plan_path)
     plan_df = (
@@ -35,11 +35,10 @@ def ef_histogram_matching(run_cfg, eval_cfg) -> List[DataLoader]:
         .loc[:, ["video_name", "target_ef", "target_ef_bin"]]
     )
 
-
     # Add new target_ef
     ds_list = []
     for nmf in eval_cfg.test_n_missing_frames:
-        ds = EchoDataset(cfg=run_cfg, split="test", ef_column="target_ef", n_missing_frames=nmf, **eval_cfg.dataset_kwargs)
+        ds = EchoDataset(cfg=run_cfg, split="test", ef_column="target_ef", n_missing_frames=nmf, **eval_cfg.get('dataset_kwargs', {}))
         # Bring target_ef and target_ef_bin into ds.df
         ds.df = ds.df.merge(
             plan_df, on="video_name", how="inner", validate="one_to_many"
@@ -66,7 +65,7 @@ def ef_samples_in_range(run_cfg, eval_cfg) -> List[DataLoader]:
     ef_gen_range = scheme_args.get("ef_gen_range")
 
     ds_list = [
-        EchoDataset(cfg=run_cfg, split="test", cache=False, n_missing_frames=nmf, **eval_cfg.dataset_kwargs)
+        EchoDataset(cfg=run_cfg, split="test", cache=False, n_missing_frames=nmf, **eval_cfg.get('dataset_kwargs', {}))
         for nmf in eval_cfg.test_n_missing_frames
     ]
 
@@ -83,7 +82,9 @@ def ef_samples_in_range(run_cfg, eval_cfg) -> List[DataLoader]:
 @torch.no_grad()
 def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, latents_dir):
     """Evaluate model on list of DataLoaders and save latent videos and metadata.csv."""
-    batch_size = eval_cfg.inference_schemes.ef_samples_in_range.n_ef_samples
+    Cc, T, H, W = dl_list[0].dataset[0]['cond_image'].shape
+    C = int(run_cfg.vae.resolution[0])
+    data_shape = (C, T, H, W)
 
     metadata_df_rows = []
     for dl in tqdm(dl_list, total=len(dl_list), desc=f"DataLoaders: {inference_ef_samples_in_range.__name__}"):
@@ -93,12 +94,14 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
 
         for batch in tqdm(dl, desc="Batches"):
             reference_batch, repeated_batch = batch
+            batch_size = repeated_batch['cond_image'].shape[0]
             repeated_batch = {k: v.to(device) for k, v in repeated_batch.items()}
 
             sample_videos = model.sample(
                 **repeated_batch,
                 batch_size=batch_size,
-                data_shape=data_shape
+                data_shape=data_shape,
+                **eval_cfg.get('model_sample_kwargs', {})
             ) # (n_ef_samples_in_range + 1, C, T, H, W)
             sample_videos = sample_videos.detach().cpu()
             sample_videos /= run_cfg.vae.scaling_factor 
@@ -136,24 +139,28 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
 
 
 @torch.no_grad()
-def inference_ef_histogram_matching(model, dl_list, run_cfg, device, latents_dir):
+def inference_ef_histogram_matching(model, dl_list, run_cfg, eval_cfg, device, latents_dir):
     """Evaluate model on list of DataLoaders and save latent videos and metadata.csv."""
+
+    Cc, T, H, W = dl_list[0].dataset[0]['cond_image'].shape
+    C = int(run_cfg.vae.resolution[0])
+    data_shape = (C, T, H, W)
 
     metadata_df_rows = []
     for dl in tqdm(dl_list, total=len(dl_list), desc=f"DataLoaders: {inference_ef_histogram_matching.__name__}"):
-        batch_size = dl.batch_size
-        data_shape = tuple(dl.dataset[0]['x'].shape)
         nmf = dl.dataset.kwargs['n_missing_frames']
         nmf = f"{str(int(100*nmf))}p" if not isinstance(nmf, str) else nmf # 0.75 -> '75p', 'max' -> 'max'
 
         for batch in tqdm(dl, desc="Batches"):
             reference_batch, input_batch = batch
+            batch_size = input_batch['cond_image'].shape[0]
             input_batch = {k: v.to(device) for k, v in input_batch.items()}
 
             sample_videos = model.sample(
                 **input_batch,
                 batch_size=batch_size,
-                data_shape=data_shape
+                data_shape=data_shape,
+                **eval_cfg.get('model_sample_kwargs', {})
             ) # (B, C, T, H, W)
             sample_videos = sample_videos.detach().cpu()
             sample_videos /= run_cfg.vae.scaling_factor 
@@ -236,6 +243,7 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
             'model': model,
             'dl_list': dl_list,
             'run_cfg': run_cfg,
+            'eval_cfg': eval_cfg,
             'device': device,
         }
 
@@ -251,7 +259,6 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
             (latents_dir / scheme_name).mkdir(parents=True, exist_ok=True)
             inference_ef_samples_in_range(
                 latents_dir=latents_dir / scheme_name,
-                eval_cfg=eval_cfg,
                 **kwargs
             )
 

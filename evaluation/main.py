@@ -76,7 +76,7 @@ def main(eval_cfg: DictConfig):
             latents_dirs = {k: Path(v) for k,v in cfg_latents_dirs.items()}
 
 
-        decoded_videos_dirs = {}
+        decoded_videos_dirs = {k: {} for k in latents_dirs}  # scheme_name -> {query_name: path}
         for scheme_name, latents_dir in latents_dirs.items():
             assert latents_dir.exists(), f"Latents directory does not exist: {latents_dir}"
 
@@ -170,7 +170,9 @@ def main(eval_cfg: DictConfig):
 
                     # Pairwise metrics with CIs
                     pairwise_metrics = eval_cfg.metrics.get('which')
-                    if (pairwise_metrics is not None) and ('reconstruction' in name): # pairwise only makes sense for reconstruction
+                    if pairwise_metrics is not None: # pairwise only makes sense for reconstruction
+
+                        just_save_payload = ('generation' in name)
                         print(f"\n[info] Computing pairwise metrics for: {name}", flush=True)
                         
                         confidence = float(metrics_cfg.get('confidence', 0.95))
@@ -190,6 +192,7 @@ def main(eval_cfg: DictConfig):
                             payload_kwargs={
                                 'stylegan_results': img_results_json['results'] | vid_results_json.get('results', {})
                                 },
+                            just_save_payload=just_save_payload,
                         )
                         print(f"[metrics] Wrote summary YAML under: {out_paths['result_yaml']}")
                     else:
@@ -197,15 +200,15 @@ def main(eval_cfg: DictConfig):
 
                 pprint(stylegan_results)
 
-            for i in ['reconstruction', 'generation']:
-                dirr = Path(eval_cfg.videos_root) / scheme / i
-                if not dirr.exists():
-                    print(f"[info] Skipping metrics collection for {dirr} as it does not exist.")
-                collect_metric_results(
-                    dir_base=dirr / i,
-                    save_path=dirr / i,
-                    make_tables=True,
-                )
+            # Collect metric results into tables
+            for parent in inference_root.parents:
+                if parent.name in ['reconstruction', 'generation']:
+                    collect_metric_results(
+                        dir_base=parent,
+                        save_path=parent,
+                        make_tables=True,
+                    )
+
 
 
 
