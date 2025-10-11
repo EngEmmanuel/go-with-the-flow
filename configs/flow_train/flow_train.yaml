@@ -8,6 +8,7 @@ dataset:
   max_frames: 32
   batch_size: 5
   cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
+  masking_distribution: uniform  # Distribution to use for random masking; 'uniform' or 'geometric'
 
 flow:
   type: linear

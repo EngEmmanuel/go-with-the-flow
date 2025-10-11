@@ -118,7 +118,10 @@ class EchoDataset(Dataset):
 
     def transform(self, z: torch.Tensor):
         # Random masking
-        z_masked, observed_mask = self.mask_random_frames(z)
+        z_masked, observed_mask = self.mask_random_frames(
+            video=z,
+            dist=self.cfg.dataset.get('masking_distribution', 'uniform')
+        )
 
         # Resample to fixed length
         resampled, pad_mask = self.resample_sequence(
