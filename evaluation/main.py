@@ -24,6 +24,10 @@ from utils import select_device
 print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
 
 
+#TODO: A way to save the config. Obviously can't just save the eval_cfg as the 
+# code uses the paths generated in real time. Perhaps duplicate the eval_cfg and
+# overwrite certain fields?. Then save that copy alongside the results.
+
 @hydra.main(version_base=None, config_path="configs", config_name="eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
