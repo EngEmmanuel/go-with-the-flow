@@ -17,7 +17,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from my_src.models import UNetSTIC, DiffuserSTDiT
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
-from my_src.flows import LinearFlow
+from my_src.flows import LinearFlow, MeanFlow
 from dataset import make_sampling_collate
 from vae.util import load_vae_and_processor
 
@@ -62,12 +62,14 @@ class FlowVideoGenerator(LightningModule):
 
     def training_step(self, batch, batch_idx):
         batch = self.maybe_drop_cond(batch)
-        loss = self.model(**batch)
+        out = self.model(**batch)
+        loss = self._unwrap_and_log_loss(out, "train")
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
-        loss = self.model(**batch)
+        out = self.model(**batch)
+        loss = self._unwrap_and_log_loss(out, "val")
         self.log('val_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
@@ -140,6 +142,20 @@ class FlowVideoGenerator(LightningModule):
                 on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
         return batch
 
+    def _unwrap_and_log_loss(self, out, split: str):
+        """
+        Accepts either a scalar loss or a dict like:
+          {'loss': total, 'flow_loss': x, 'recon_loss': y}
+        Logs labeled components with the split prefix.
+        Returns the scalar loss.
+        """
+        if isinstance(out, dict) and 'loss' in out:
+            loss = out['loss']
+            comps = {f"{split}_{k}": v for k, v in out.items() if k != 'loss'}
+            if comps:
+                self.log_dict(comps, prog_bar=False, on_step=True, on_epoch=True)
+            return loss
+        return out  # assume scalar tensor
 
 def load_model(cfg, dummy_data, device):
     if isinstance(dummy_data, dict):
@@ -172,9 +188,14 @@ def load_flow(cfg, model):
         case "linear":
             return LinearFlow(
                 model=model,
-                **cfg.flow.kwargs
+                **cfg.flow.get('kwargs', {})
             )
 
+        case "mean":
+            return MeanFlow(
+                model=model,
+                **cfg.flow.get('kwargs', {})
+            )
 
     raise ValueError(f"Unsupported flow class: {cfg.flow.type}")
 
