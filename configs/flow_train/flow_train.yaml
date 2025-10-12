@@ -1,20 +1,20 @@
 defaults:
   - _self_ # First takes priority so any properties redefined here take precedence
-  - model: hr_unet
-  - paths: mac # Simply override in cli call
+  - model: unet_test #hr_unet
+  - paths: ibme # Simply override in cli call
 
 dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
-  max_frames: 32
-  batch_size: 5
+  max_frames: 1 #debug 32
+  batch_size: 1 #debug 5
   cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
   masking_distribution: uniform  # Distribution to use for random masking; 'uniform' or 'geometric'
 
 flow:
-  type: linear
-  kwargs:
-    clip_values: null #[-.inf, .inf]
-    clip_flow_values: null # [-.inf, .inf]
+  type: mean
+  #kwargs:
+  #  clip_values: null #[-.inf, .inf]
+  #  clip_flow_values: null # [-.inf, .inf]
 
 vae:
   resolution: 4f4
@@ -34,7 +34,7 @@ trainer:
     val_check_interval: 0.1
     accumulate_grad_batches: 1
     #profiler: simple
-    #overfit_batches: 0.1
+    overfit_batches: 0.1 #debug
 
 
 sample_every_n_val_steps: 400
