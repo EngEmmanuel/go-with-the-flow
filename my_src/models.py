@@ -1225,9 +1225,12 @@ class UNetSTIC(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
         time_embed_dim = block_out_channels[0] * 4
 
         self.time_proj = Timesteps(block_out_channels[0], True, downscale_freq_shift=0)
+        self.cond_t_proj = Timesteps(block_out_channels[0], True, downscale_freq_shift=0)
+
         timestep_input_dim = block_out_channels[0]
 
         self.time_embedding = TimestepEmbedding(timestep_input_dim, time_embed_dim)
+        self.cond_t_embedding = TimestepEmbedding(timestep_input_dim, time_embed_dim)
 
         # self.add_time_proj = Timesteps(
         #     addition_time_embed_dim, True, downscale_freq_shift=0
@@ -1466,6 +1469,7 @@ class UNetSTIC(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
         timestep: Union[torch.Tensor, float, int],
         encoder_hidden_states: torch.Tensor,
         cond_image=None,
+        cond_t: Optional[Union[torch.Tensor, float, int]] = None,
         mask=None,
         # added_time_ids: torch.Tensor,
         return_dict: bool = True,
@@ -1520,14 +1524,24 @@ class UNetSTIC(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
         batch_size, num_frames = sample.shape[:2]
         timesteps = timesteps.expand(batch_size)
 
-        t_emb = self.time_proj(timesteps)
-
-        # `Timesteps` does not contain any weights and will always return f32 tensors
-        # but time_embedding might actually be running in fp16. so we need to cast here.
-        # there might be better ways to encapsulate this.
-        t_emb = t_emb.to(dtype=sample.dtype)
-
+        t_emb = self.time_proj(timesteps).to(dtype=sample.dtype)
         emb = self.time_embedding(t_emb)
+
+        # conditioning on t-r when using MeanFlow
+        if cond_t is not None:
+            if not torch.is_tensor(cond_t):
+                is_mps = (sample.device.type == "mps")
+                dtype = torch.int32 if is_mps else torch.int64
+                cond_t = torch.tensor(
+                    [cond_t], dtype=dtype, device=sample.device
+                )
+            elif len(cond_t.shape) == 0:
+                cond_t = cond_t[None].to(sample.device)
+        
+            cond_t = cond_t.expand(batch_size)
+            cond_t_emb = self.cond_t_proj(cond_t).to(dtype=sample.dtype)
+            cond_t_emb = self.cond_t_embedding(cond_t_emb)
+            emb = emb + cond_t_emb
 
         # time_embeds = self.add_time_proj(added_time_ids.flatten())
         # time_embeds = time_embeds.reshape((batch_size, -1))
