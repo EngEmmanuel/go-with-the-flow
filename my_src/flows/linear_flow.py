@@ -77,9 +77,30 @@ class LinearFlow(Module):
         maybe_clip = (lambda t: t.clamp_(*self.clip_values)) if self.clip_values is not None else identity
         maybe_clip_flow = (lambda t: t.clamp_(*self.clip_flow_values)) if self.clip_flow_values is not None else identity
 
+        # Backward-compatible lookup for learned null embedding: prefer flow.null_ehs, fallback to base model.null_ehs
         uncond_ehs = getattr(self, "null_ehs", None)
+        if uncond_ehs is None:
+            uncond_ehs = getattr(self.model, "null_ehs", None)
         if uncond_ehs is not None:
-            uncond_ehs = uncond_ehs.expand(batch_size, -1, -1)
+            # Get underlying tensor
+            uncond = uncond_ehs.data if isinstance(uncond_ehs, torch.nn.Parameter) else uncond_ehs
+            # Try to match encoder_hidden_states shape (excluding batch)
+            target_tail = tuple(encoder_hidden_states.shape[1:]) if hasattr(encoder_hidden_states, 'shape') else None
+            if target_tail and uncond.shape != target_tail:
+                try:
+                    uncond = uncond.view(*target_tail)
+                except Exception:
+                    # leave as-is; expand best-effort below
+                    pass
+            # Expand along batch dimension
+            if uncond.dim() == 0:
+                uncond = uncond.view(1, 1)
+            if uncond.dim() == 1:
+                uncond_ehs = uncond.unsqueeze(0).expand(batch_size, -1)
+            elif uncond.dim() == 2:
+                uncond_ehs = uncond.unsqueeze(0).expand(batch_size, -1, -1)
+            else:
+                uncond_ehs = uncond.unsqueeze(0).expand(batch_size, *uncond.shape)
 
         def _predict(x, t, ehs):
             return self.predict_flow(
@@ -108,7 +129,6 @@ class LinearFlow(Module):
                 flow_cond = _predict(x, t, encoder_hidden_states)
                 flow_uncond = _predict(x, t, uncond_ehs)
                 flow = flow_uncond + guidance_scale * (flow_cond - flow_uncond)
-
             return maybe_clip_flow(flow)
 
         # Start with random gaussian noise - y0

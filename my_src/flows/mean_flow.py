@@ -1,6 +1,7 @@
 import torch
 import torch.nn as nn
 from torch.nn import Module
+from torch.nn.attention import sdpa_kernel, SDPBackend
 from torch import Tensor, tensor, stack, ones, zeros, zeros_like
 from torchdiffeq import odeint
 from einops import rearrange, repeat, reduce
@@ -130,8 +131,6 @@ class MeanFlow(Module):
                 cond_image=cond_image,
                 cond_t=delta_time
             )
-            if hasattr(pred_flow, 'sample'):
-                pred_flow = pred_flow.sample
 
             denoised = denoised - delta * pred_flow
 
@@ -185,8 +184,6 @@ class MeanFlow(Module):
                 cond_image=cond_image,
                 cond_t=ones(batch_size, device = device),
             )
-            if hasattr(pred, 'sample'):
-                pred = pred.sample
             denoised = noise - pred
 
         return denoised
@@ -273,16 +270,17 @@ class MeanFlow(Module):
             # Normal flow matching without jvp 25-50% of the time
 
             pred, rate_avg_vel_change = (
-                self.model(*inputs).sample,
+                self.model(*inputs),
                 tensor(0., device = device)
             )
         else:
             # Algorithm 1
-            pred, rate_avg_vel_change = jvp(
-                self.model,
-                inputs,
-                tangents
-            )
+            with sdpa_kernel(SDPBackend.MATH):
+                pred, rate_avg_vel_change = jvp(
+                    self.model,
+                    inputs,
+                    tangents
+                )
 
         # the new proposed target
 

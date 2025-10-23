@@ -1472,7 +1472,7 @@ class UNetSTIC(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
         cond_t: Optional[Union[torch.Tensor, float, int]] = None,
         mask=None,
         # added_time_ids: torch.Tensor,
-        return_dict: bool = True,
+        return_dict: bool = False,
     ) -> Union[UNetSTICOutput, Tuple]:
         r"""
         The [`UNetSpatioTemporalConditionModel`] forward method.
@@ -1637,7 +1637,7 @@ class UNetSTIC(ModelMixin, ConfigMixin, UNet2DConditionLoadersMixin):
         sample = sample.permute(0, 2, 1, 3, 4)
 
         if not return_dict:
-            return (sample,)
+            return sample
 
         return UNetSTICOutput(sample=sample)
 
