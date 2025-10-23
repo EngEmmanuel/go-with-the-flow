@@ -78,6 +78,87 @@ def ef_samples_in_range(run_cfg, eval_cfg) -> List[DataLoader]:
     return dl_list
 
 
+def frame_upsampling(run_cfg, eval_cfg) -> List[DataLoader]:
+    """
+    Build dataloaders for frame upsampling evaluation.
+    Each dataloader corresponds to a different n_missing_frames setting.
+    """
+    scheme_args = eval_cfg.inference_schemes.get("frame_upsampling", {})
+
+    batch_size = scheme_args.get("batch_size", DEFAULT_BATCH_SIZE)
+    num_workers = scheme_args.get("num_workers", DEFAULT_NUM_WORKERS)
+
+    ds_list = [
+        EchoDataset(cfg=run_cfg, split="test", cache=False, masking_distribution=f'every_{n}', **eval_cfg.get('dataset_kwargs', {}))
+        for n in range(1, 4)
+    ]
+
+    dl_list = [
+        DataLoader(ds, batch_size=batch_size, num_workers=num_workers, collate_fn=default_eval_collate)
+        for ds in ds_list
+    ]
+    return dl_list
+
+
+@torch.no_grad()
+def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latents_dir):
+    """Evaluate model on list of DataLoaders and save latent videos and metadata."""
+
+    Cc, T, H, W = dl_list[0].dataset[0]['cond_image'].shape
+    C = int(run_cfg.vae.resolution[0])
+    data_shape = (C, T, H, W)
+
+    metadata_df_rows = []
+    for dl in tqdm(dl_list, total=len(dl_list), desc=f"DataLoaders: {inference_frame_upsampling.__name__}"):
+        data_shape = tuple(dl.dataset[0]['x'].shape)
+        n = int(dl.dataset.kwargs['masking_distribution'].split("_")[-1])
+        nmf = f"{str(int(100*n/(n+1)))}p" 
+
+        for batch in tqdm(dl, desc="Batches"):
+            reference_batch, input_batch = batch
+            batch_size = input_batch['cond_image'].shape[0]
+            input_batch = {k: v.to(device) for k, v in input_batch.items()}
+
+            sample_videos = model.sample(
+                **input_batch,
+                batch_size=batch_size,
+                data_shape=data_shape,
+                **eval_cfg.get('model_sample_kwargs', {})
+            ) # (B, C, T, H, W)
+            sample_videos = sample_videos.detach().cpu()
+            sample_videos /= run_cfg.vae.scaling_factor 
+
+            for i in range(batch_size):
+                video = sample_videos[i]
+                ef = round(int(100*reference_batch['ef_values'][i].item()),2)
+                video_name = f"{reference_batch['video_name'][i]}_ef{ef}_nmf{nmf}"
+                metadata_df_rows.append({
+                    'video_name': video_name,
+                    'n_missing_frames': nmf,
+                    'EF': ef,
+                    'rec_or_gen': 'rec',
+                    'original_real_video_name': reference_batch['video_name'][i],
+                    'observed_mask': reference_batch['observed_mask'][i].tolist(),
+                    'not_pad_mask': reference_batch['not_pad_mask'][i].tolist(),
+                })
+                stitched_video = stitch_video(
+                    input_video=reference_batch['cond_image'][i].cpu()[:4]/run_cfg.vae.scaling_factor,
+                    output_video=video,
+                    observed_mask=reference_batch['observed_mask'][i].tolist(),
+                    not_pad_mask=reference_batch['not_pad_mask'][i].tolist()
+                )
+                torch.save(
+                    obj = {
+                        'video': video,
+                        'stitched_video': stitched_video, # for compatibility with EchoDataset latents
+                    },
+                    f = latents_dir / f"{video_name}.pt"
+                )
+
+
+    df = pd.DataFrame(metadata_df_rows)
+    df.to_csv(latents_dir / 'metadata.csv', index=False)
+    return latents_dir
 
 @torch.no_grad()
 def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, latents_dir):
@@ -205,6 +286,7 @@ def inference_ef_histogram_matching(model, dl_list, run_cfg, eval_cfg, device, l
 SCHEME_REG: Dict[str, Callable[[Any, Any], List[DataLoader]]] = {
     "ef_histogram_matching": ef_histogram_matching,
     "ef_samples_in_range": ef_samples_in_range,
+    "frame_upsampling": frame_upsampling,
 }
 
 
@@ -235,6 +317,7 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
     # Setup output directory with timestamp
     date, time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S").split("_") 
     latents_dir = Path(eval_cfg.output_dir) / 'latents' / date / time
+    latents_dir = latents_dir / 'debugging' if eval_cfg.get('debugging', False) else latents_dir
     latents_dir.mkdir(parents=True, exist_ok=True)
 
     all_latents_dirs = {}
@@ -261,7 +344,13 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
                 latents_dir=latents_dir / scheme_name,
                 **kwargs
             )
-
+        elif scheme_name == 'frame_upsampling':
+            print(f"[info] Running inference scheme: {scheme_name}")
+            (latents_dir / scheme_name).mkdir(parents=True, exist_ok=True)
+            inference_frame_upsampling(
+                latents_dir=latents_dir / scheme_name,
+                **kwargs
+            )
 
         all_latents_dirs[scheme_name] = latents_dir / scheme_name
         

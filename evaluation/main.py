@@ -28,7 +28,7 @@ print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
 # code uses the paths generated in real time. Perhaps duplicate the eval_cfg and
 # overwrite certain fields?. Then save that copy alongside the results.
 
-@hydra.main(version_base=None, config_path="configs", config_name="eval_cfg")
+@hydra.main(version_base=None, config_path="configs", config_name="full_eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
     if not tasks:
@@ -42,6 +42,9 @@ def main(eval_cfg: DictConfig):
     decoded_videos_dir = None
     run_cfg = None
     model = None
+    
+    pprint(eval_cfg, indent=3)
+
 
     # Task: generate latents
     if "gen_latents" in tasks:
@@ -101,6 +104,7 @@ def main(eval_cfg: DictConfig):
                     query={'name':name,'pattern':query},
                     fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
                     device=device,
+                    debugging=eval_cfg.get('debugging', False),
                 )
                 decoded_videos_dirs[scheme_name][name] = decoded_videos_dir
 
@@ -204,14 +208,14 @@ def main(eval_cfg: DictConfig):
 
                 pprint(stylegan_results)
 
-            # Collect metric results into tables
-            for parent in inference_root.parents:
-                if parent.name in ['reconstruction', 'generation']:
-                    collect_metric_results(
-                        dir_base=parent,
-                        save_path=parent,
-                        make_tables=True,
-                    )
+                # Collect metric results into tables
+                for parent in inference_root.parents:
+                    if parent.name in ['reconstruction', 'generation']:
+                        collect_metric_results(
+                            dir_base=parent,
+                            save_path=parent,
+                            make_tables=True,
+                        )
 
 
 

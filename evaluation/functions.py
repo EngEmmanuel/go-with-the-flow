@@ -70,9 +70,33 @@ def load_model_from_run(run_dir: str | Path, dummy_data: dict, ckpt_name: Option
 	# FlowVideoGenerator saved as LightningModule with attribute 'model'
 	# Strip leading 'model.' to match our flow wrapper keys
 	cleaned = {k.split("model.", 1)[1] if k.startswith("model.") else k: v for k, v in state_dict.items()}
-	if 'null_ehs' in cleaned:
-		model.null_ehs = torch.nn.Parameter(cleaned["null_ehs"])
 
+	# Backward compatibility: find any key that represents the learned null embedding and normalize to 'null_ehs'
+	null_keys = [k for k in list(cleaned.keys()) if (k == 'null_ehs' or k.endswith('.null_ehs'))]
+	null_tensor = None
+	# Prefer exact 'null_ehs' if present
+	for k in null_keys:
+		if k == 'null_ehs':
+			null_tensor = cleaned[k]
+			break
+	# Else take the first '*.null_ehs'
+	if null_tensor is None and null_keys:
+		null_tensor = cleaned[null_keys[0]]
+		# also move it under the normalized name
+		cleaned['null_ehs'] = null_tensor
+	# Drop any duplicate names like 'model.null_ehs' from cleaned to avoid unexpected keys
+	for k in null_keys:
+		if k != 'null_ehs' and k in cleaned:
+			cleaned.pop(k)
+
+	# If we recovered a null embedding tensor, ensure the flow has it as a parameter
+	if null_tensor is not None:
+		if not hasattr(model, 'null_ehs') or not isinstance(getattr(model, 'null_ehs'), torch.nn.Parameter):
+			model.register_parameter('null_ehs', torch.nn.Parameter(null_tensor.clone()))
+		else:
+			with torch.no_grad():
+				model.null_ehs.copy_(null_tensor)
+	print(f'\n\n null_ehs value: {model.null_ehs} \n\n')
 	# Load only matching keys
 	missing, unexpected = model.load_state_dict(cleaned, strict=False)
 	if missing:

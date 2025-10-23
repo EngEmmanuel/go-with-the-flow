@@ -7,7 +7,7 @@ tasks: ['gen_latents', 'latents_to_videos','compute_metrics' ] #to enable metric
 #tasks: ['compute_metrics'] #to enable metrics
 
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
-run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-20/22-39-38
+run_dir: ${paths.train_output_path}/hydra_outputs/2025-10-12/21-13-24
 ckpt_name: last.ckpt
 
 # Debugging
@@ -26,8 +26,8 @@ inference_schemes:
     ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
     n_ef_samples: 4  # Number of ef_gen samples per video in ef_gen_range
 
-model_sample_kwargs:
-  guidance_scale: 5  # Classifier-free guidance scale; set to 1.0 for no guidance
+#model_sample_kwargs:
+#  guidance_scale: 5  # Classifier-free guidance scale; set to 1.0 for no guidance
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
 

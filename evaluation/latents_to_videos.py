@@ -194,6 +194,8 @@ def convert_latents_directory(
     fps_metadata_csv: Optional[Path] = None,
     decode_batch_size: int = 16,
     device: Optional[torch.device] = None,
+    debugging: bool = False,
+
 ):
     """Convert latent videos saved by evaluate_to_latents to videos/frames.
 
@@ -213,6 +215,7 @@ def convert_latents_directory(
     run_dir = Path(run_dir)
     default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-3:])) / '/'.join(query['name'].split('_'))
     output_dir = Path(output_dir) if output_dir else default_output_dir
+    output_dir = output_dir / 'debugging' if debugging else output_dir
     output_dir.mkdir(parents=True, exist_ok=True)
 
     # Load cfg then VAE (subfolder derived from cfg)
