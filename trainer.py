@@ -9,18 +9,22 @@ import torch.optim as optim
 from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import Literal, Callable
-from pytorch_lightning import LightningModule, Trainer
-from pytorch_lightning.loggers import WandbLogger
-from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
-#from pytorch_lightning.callbacks.weight_averaging import WeightAveraging
+from lightning import LightningModule, Trainer
+from lightning.pytorch.loggers import WandbLogger
+from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
+from lightning.pytorch.utilities import rank_zero_only
+#from lightning.callbacks.weight_averaging import WeightAveraging
+
+
 
 from my_src.models import UNetSTIC, DiffuserSTDiT
+from my_src.model import UNet3D
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
 from my_src.flows import LinearFlow, MeanFlow
 from dataset import make_sampling_collate
 from vae.util import load_vae_and_processor
-
+#from utils.ema import EMAWeightAveraging
 
 def cycle(dl):
     while True:
@@ -56,9 +60,17 @@ class FlowVideoGenerator(LightningModule):
 
         self._val_counter = 0
 
-        # learned 1-D null EF for CFG
-        self.null_ehs = torch.nn.Parameter(torch.zeros(1, 1))  # shape [1,1]
+        # Classifier-free guidance (CFG): register the learnable null EF embedding
+        # on the FLOW MODULE (so it is saved in the flow checkpoint and available at inference).
         self.uncond_prob = float(cfg.trainer.get('uncond_prob', 0.0))
+        if self.uncond_prob > 0.0:
+            if not hasattr(self.model, 'null_ehs') or getattr(self.model, 'null_ehs') is None:
+                # Register as a parameter on the flow so it persists with the flow's weights
+                self.model.register_parameter('null_ehs', torch.nn.Parameter(torch.zeros(1, 1)))  # shape [1,1]
+        else:
+            # Ensure attribute exists for consistency (not a Parameter)
+            if not hasattr(self.model, 'null_ehs'):
+                setattr(self.model, 'null_ehs', None)
 
     def training_step(self, batch, batch_idx):
         batch = self.maybe_drop_cond(batch)
@@ -131,12 +143,16 @@ class FlowVideoGenerator(LightningModule):
         drop = (torch.rand(B, device=ehs.device) < self.uncond_prob)  # True => drop EF
         if drop.any():
             m = drop.view(B, 1)                               # [B,1], bool
-            null = self.nullf_ehs.expand_as(ehs)               # shape-match; dtype/device handled by PL
+            null_param = getattr(self.model, 'null_ehs', None)
+            if null_param is None:
+                return batch  # nothing to drop to
+            null = null_param.expand_as(ehs)                  # shape-match; dtype/device handled by PL
             ehs = torch.where(m, null, ehs)                   # functional, no in-place
             batch['encoder_hidden_states'] = ehs
 
         # log right before returning (only runs when CFG-style dropout is active)
-        self.log("train/null_ehs_value", self.null_ehs.item(),
+        if getattr(self.model, 'null_ehs', None) is not None:
+            self.log("train/null_ehs_value", float(self.model.null_ehs.detach().item()),
                 on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
         self.log("train/ef_drop_rate", drop.float().mean().item(),
                 on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
@@ -166,7 +182,7 @@ def load_model(cfg, dummy_data, device):
 
     match (cfg.model.type).lower():
         case "unet":
-            return UNetSTIC(
+            return UNet3D(
                 sample_size=W,
                 in_channels=C + Cc, # model expects concatenated x and cond_image along channels
                 out_channels=C,
@@ -239,14 +255,19 @@ def main(cfg: DictConfig):
         if isinstance(v, dict):
             callbacks_list.append(ModelCheckpoint(**v, dirpath=ckpt_dir))
 
+    # LR monitor
     callbacks_list.append(LearningRateMonitor(logging_interval='step'))
+    # EMA
+    #if 'ema' in cfg:
+    #    callbacks_list.append(EMAWeightAveraging(**cfg.ema.kwargs))
 
+    config = OmegaConf.to_container(cfg, resolve=True)
+    config.update({'local_output_dir': str(output_dir)})
     logger = WandbLogger(
         **cfg.wandb,
+        save_dir=str(output_dir),
         config=OmegaConf.to_container(cfg, resolve=True)
     )
-    run = logger.experiment
-    run.summary['local_output_dir'] = str(output_dir)
 
     # Instantiate trainers
     trainer = Trainer(
