@@ -9,7 +9,7 @@ tasks: ['gen_latents', 'latents_to_videos', 'compute_metrics']
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 output_dir: ${run_dir}/evaluation
 
-run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-26/09-07-39
+run_dir: ${paths.train_output_path}/hydra_outputs/2025-10-12/21-01-13  # Path to training run output directory
 ckpt_name: last.ckpt
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
@@ -23,7 +23,7 @@ inference_schemes:
     
   ef_samples_in_range:
     ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
-    n_ef_samples: 4  # Number of ef_gen samples per video in ef_gen_range
+    n_ef_samples: 3  # Number of ef_gen samples per video in ef_gen_range
 
   frame_upsampling:
     batch_size: 16
@@ -78,7 +78,7 @@ queries:
 metrics:
   real_glob: ['*']            # glob pattern to match real videos
   fake_glob: ['*']            # glob pattern to match generated videos
-  which: [ssim, psnr, lpips_vgg]  # metrics to compute
+  pairwise_metrics: [ssim, psnr, lpips_vgg, mae, mse]  # metrics to compute
   stylegan_metrics: [fid50k_full, fvd2048_10f]
   confidence: 0.95           # confidence level for CIs
   #resize: [112, 112]         # optional resize (H, W); set to null to keep native

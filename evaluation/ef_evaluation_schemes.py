@@ -1,3 +1,4 @@
+import time
 import torch
 import pandas as pd
 
@@ -309,14 +310,17 @@ def generate_dls_for_evaluation_scheme(run_cfg, eval_cfg) -> Dict[str, List[Data
 
     return all_dataloaders
 
-def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
+def run_inference(eval_cfg, run_cfg, model, dataloaders, device, datetime_tuple=None):
     """
     Run inference on model using dataloaders specified in eval_cfg.
     Returns a dict mapping scheme_name -> latents_dir (Path).
     """
     # Setup output directory with timestamp
-    date, time = datetime.now().strftime("%Y-%m-%d_%H-%M-%S").split("_") 
-    latents_dir = Path(eval_cfg.output_dir) / 'latents' / date / time
+    if datetime_tuple is None:
+        date, timee = datetime.now().strftime("%Y-%m-%d_%H-%M-%S").split("_")
+    else:
+        date, timee = datetime_tuple
+    latents_dir = Path(eval_cfg.output_dir) / 'latents' / date / timee
     latents_dir = latents_dir / 'debugging' if eval_cfg.get('debugging', False) else latents_dir
     latents_dir.mkdir(parents=True, exist_ok=True)
 
@@ -330,6 +334,7 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
             'device': device,
         }
 
+        start_t = time.perf_counter()
         if scheme_name == 'ef_histogram_matching':
             print(f"[info] Running inference scheme: {scheme_name}")
             (latents_dir / scheme_name).mkdir(parents=True, exist_ok=True)
@@ -351,7 +356,11 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device):
                 latents_dir=latents_dir / scheme_name,
                 **kwargs
             )
+        end_t = time.perf_counter()
+        elapsed = end_t - start_t
+        # Print elapsed time in hours (fractional)
+        print(f"[timing][gen_latents] {scheme_name}: {elapsed / 3600:.4f} hours", flush=True)
 
         all_latents_dirs[scheme_name] = latents_dir / scheme_name
-        
+
     return all_latents_dirs

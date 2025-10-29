@@ -113,7 +113,7 @@ metrics:
 
   real_glob: ['*']            # glob pattern to match real videos
   fake_glob: ['*']            # glob pattern to match generated videos
-  which: [ssim, psnr, lpips_vgg]  # metrics to compute
+  pairwise_metrics: [ssim, psnr, lpips_vgg, mae, mse]  # metrics to compute
   stylegan_metrics: [fid50k_full, fvd2048_10f]
   confidence: 0.95           # confidence level for CIs
   #resize: [112, 112]         # optional resize (H, W); set to null to keep native

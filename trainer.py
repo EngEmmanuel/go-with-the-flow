@@ -15,10 +15,11 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import rank_zero_only
 #from lightning.callbacks.weight_averaging import WeightAveraging
 
+from my_src.jvp_model import JVPFlashAttnProcessor
 
 
-from my_src.models import UNetSTIC, DiffuserSTDiT
-from my_src.model import UNet3D
+#from my_src.models import UNetSTIC, DiffuserSTDiT
+from my_src.jvp_model import UNet3D
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
 from my_src.flows import LinearFlow, MeanFlow
@@ -246,6 +247,7 @@ def main(cfg: DictConfig):
 
     # Load model and flow wrapper
     model = load_model(cfg, dummy_data, device)
+    model.set_attn_processor(JVPFlashAttnProcessor())
     model = load_flow(cfg, model)
     model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
 

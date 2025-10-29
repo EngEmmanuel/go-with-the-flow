@@ -1,18 +1,18 @@
 defaults:
   - _self_ # First takes priority so any properties redefined here take precedence
   - model: unet
-  - flow: linear
+  - flow: mean
   - paths: ibme # Simply override in cli call
 
 dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
   max_frames: 32
   batch_size: 5
-  cond_pad_mask: false #true  # Whether to append the padding mask to the conditioning input
+  cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
   masking_distribution: uniform  # Distribution to use for random masking; 'uniform' or 'geometric'
 
 vae:
-  resolution: 4f4 #(keep)
+  resolution: 4f8 #(keep)
   scaling_factors:
     4f4: 0.1080
     4f8: 0.2232
