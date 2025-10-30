@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+from datetime import datetime
 import re
 import math
 import json
@@ -11,7 +12,6 @@ import torch
 import torch.nn.functional as F
 import pandas as pd
 from PIL import Image
-from datetime import datetime
 from omegaconf import OmegaConf
 from skimage.metrics import structural_similarity as skimage_ssim
 
@@ -165,6 +165,7 @@ def compute_metrics_for_datasets(
     fake_glob: Union[str, List[str]] = '*',
     payload_kwargs: Optional[Dict[str, Any]] = None,
     just_save_payload: bool = False,
+    datetime_tuple: Optional[Tuple[str, str]] = None,
 ) -> Dict[str, Path]:
     real_root = inference_root / 'real'
     fake_root = inference_root / 'fake'
@@ -192,8 +193,7 @@ def compute_metrics_for_datasets(
         print("[warn] lpips package not found; LPIPS(VGG) will be skipped or set to NaN.")
 
     # Save under fake_root/metric_results with a single YAML
-    ts = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
-    out_dir = Path(fake_root).parent / 'metric_results' #/ ts
+    out_dir = Path(fake_root).parent / 'metric_results'
     out_dir.mkdir(parents=True, exist_ok=True)
     result_yaml = out_dir / "metrics_summary.yaml"
 
@@ -210,10 +210,14 @@ def compute_metrics_for_datasets(
             # Buckets for metrics (only _all variant retained)
             ssim: List[float] = []
             psnr: List[float] = []
+            mae_list: List[float] = []
+            mse_list: List[float] = []
             lp: List[float] = []
 
             want_ssim = 'ssim' in [m.lower() for m in metrics]
             want_psnr = 'psnr' in [m.lower() for m in metrics]
+            want_mae = 'mae' in [m.lower() for m in metrics]
+            want_mse = 'mse' in [m.lower() for m in metrics]
             want_lp = want_lpips and lpips_net is not None
 
             for i in range(n):
@@ -233,6 +237,10 @@ def compute_metrics_for_datasets(
                     psnr.append(_psnr(x, y))
                 if want_lp:
                     lp.append(_lpips_vgg(lpips_net, x, y))
+                if want_mae:
+                    mae_list.append(torch.mean(torch.abs(x - y)).item())
+                if want_mse:
+                    mse_list.append(F.mse_loss(x, y).item())
 
 
             row = {'real_video' : rdir.name, 'fake_video' : fdir.name}
@@ -244,6 +252,10 @@ def compute_metrics_for_datasets(
                 row['psnr'] = round(float(sum(psnr) / len(psnr)), 4)
             if want_lpips:
                 row['lpips_vgg'] = round(float(sum(lp) / len(lp)), 4) if lp else float('nan')
+            if want_mae:
+                row['mae'] = round(float(sum(mae_list) / len(mae_list)), 4) if mae_list else float('nan')
+            if want_mse:
+                row['mse'] = round(float(sum(mse_list) / len(mse_list)), 4) if mse_list else float('nan')
             rows.append(row)
 
     per_video_df = pd.DataFrame(rows)
@@ -263,6 +275,11 @@ def compute_metrics_for_datasets(
     per_video_csv = out_dir / f"metrics_per_video.csv"
     per_video_df.to_csv(per_video_csv, index=False)
 
+
+    if datetime_tuple is None:
+        date, timee = datetime.now().strftime("%Y-%m-%d_%H-%M-%S").split("_")
+    else:
+        date, timee = datetime_tuple
     # YAML now only stores config + summary (aggregate) information
     payload: Dict = {
         'config': {
@@ -270,10 +287,10 @@ def compute_metrics_for_datasets(
             'fake_root': str(fake_root),
             'real_globs': real_globs,
             'fake_globs': fake_globs,
-            'which': list(metrics),
+            'pairwise_metrics': list(metrics),
             'confidence': float(confidence),
             'resize': list(resize) if resize is not None else None,
-            'timestamp': ts,
+            'timestamp': f'{date}_{timee}',
             'per_video_csv': str(per_video_csv),
         },
         **payload_kwargs,
@@ -291,7 +308,7 @@ def compute_metrics_for_datasets(
 from typing import Dict, Any, Optional, Union, Tuple, List, Iterable
 from tabulate import tabulate  # pip install tabulate
 
-NMF_ROWS = ["nmf25p", "nmf50p", "nmf75p", "nmfmax"]
+NMF_ROWS = ["nmf25p", "nmf50p", "nmf66p", "nmf75p", "nmfmax"]
 
 def collect_metric_results(
     dir_base: Path,

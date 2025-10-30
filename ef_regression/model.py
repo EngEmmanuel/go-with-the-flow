@@ -12,7 +12,9 @@ class RegressionModel(nn.Module):
     def __init__(self, config):
         super().__init__()
         self.config = config
-        self.model = r2plus1d_18(weights=R2Plus1D_18_Weights.KINETICS400_V1)
+
+        kwargs = {'weights': R2Plus1D_18_Weights.KINETICS400_V1} if config.model.pretrained else {}
+        self.model = r2plus1d_18(**kwargs)
         self.model.fc = torch.nn.Linear(self.model.fc.in_features, 1)
         self.model.fc.bias.data[0] = 0.367 # EF_Area mean: 36.7%
 
@@ -33,18 +35,23 @@ class EFRegressor(LightningModule):
     def forward(self, x):
         return self.model(x)
 
+
     def configure_optimizers(self):
-        opt = optim.Adam(
-            [
-                {'params': self.model.model.fc.parameters(), 'lr': self.config.trainer.lr},       # Backbone
-                {'params': (p for n, p in self.model.model.named_parameters() if not n.startswith("fc")), 'lr': self.config.trainer.fc_lr}     # Head
-            ],
-            weight_decay=self.config.trainer.weight_decay
-        )
-        sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
-            opt, T_0=8, T_mult=3
-        )
-        return [opt], [{"scheduler": sched, "interval": "epoch"}]
+        opt = optim.Adam(self.model.parameters(), lr=self.config.trainer.lr) # type: ignore
+        return opt
+
+    #def configure_optimizers(self):
+    #    opt = optim.Adam(
+    #        [
+    #            {'params': self.model.model.fc.parameters(), 'lr': self.config.trainer.lr},       # Backbone
+    #            {'params': (p for n, p in self.model.model.named_parameters() if not n.startswith("fc")), 'lr': self.config.trainer.fc_lr}     # Head
+    #        ],
+    #        weight_decay=self.config.trainer.weight_decay
+    #    )
+    #    sched = torch.optim.lr_scheduler.CosineAnnealingWarmRestarts(
+    #        opt, T_0=8, T_mult=3
+    #    )
+    #    return [opt], [{"scheduler": sched, "interval": "epoch"}]
     
     def training_step(self, batch, batch_idx):
         return self.shared_step(batch, batch_idx, "train")

@@ -1,5 +1,6 @@
 import sys
 import json
+import time
 import hydra
 import subprocess
 from pathlib import Path
@@ -24,11 +25,8 @@ from utils import select_device
 print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
 
 
-#TODO: A way to save the config. Obviously can't just save the eval_cfg as the 
-# code uses the paths generated in real time. Perhaps duplicate the eval_cfg and
-# overwrite certain fields?. Then save that copy alongside the results.
 
-@hydra.main(version_base=None, config_path="configs", config_name="eval_cfg")
+@hydra.main(version_base=None, config_path="configs", config_name="full_eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
     if not tasks:
@@ -42,6 +40,10 @@ def main(eval_cfg: DictConfig):
     decoded_videos_dir = None
     run_cfg = None
     model = None
+    
+    hydra_output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
+    datetime_tuple = hydra_output_dir.parts[-2:]
+
 
     # Task: generate latents
     if "gen_latents" in tasks:
@@ -61,7 +63,8 @@ def main(eval_cfg: DictConfig):
             run_cfg=run_cfg, 
             model=model, 
             device=device, 
-            dataloaders=all_dataloaders
+            dataloaders=all_dataloaders,
+            datetime_tuple=datetime_tuple
         )
 
 
@@ -90,6 +93,7 @@ def main(eval_cfg: DictConfig):
             else:
                 queries = {"all": "True"}
 
+            start_t = time.perf_counter()
             for name, query in queries.items():
                 decoded_videos_dir = convert_latents_directory(
                     real_data_path=Path(eval_cfg.real_data_path),
@@ -101,12 +105,14 @@ def main(eval_cfg: DictConfig):
                     query={'name':name,'pattern':query},
                     fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
                     device=device,
+                    debugging=eval_cfg.get('debugging', False),
                 )
                 decoded_videos_dirs[scheme_name][name] = decoded_videos_dir
 
                 print(f"[info] Wrote decoded videos under: {decoded_videos_dir}")
-
-
+            end_t = time.perf_counter()
+            elapsed = end_t - start_t
+            print(f"[timing][L2V] {scheme_name}: {elapsed / 3600:.4f} hours", flush=True)
     # Task: compute metrics (keeps stylegan-v block, adds our metrics below)
     if "compute_metrics" in tasks:
         print_line_rule()
@@ -138,6 +144,7 @@ def main(eval_cfg: DictConfig):
         stylegan_results = {scheme: {'image_metrics': {}, 'video_metrics': {}} for scheme in inference_roots}
         for scheme, group in inference_roots.items():
             print(f"\n[info] Evaluation scheme: {scheme}", flush=True)
+            start_t = time.perf_counter()
             for name, inference_root in group.items():
                 print(f"\n[info] Computing StyleGAN metrics for: {scheme}:{name}", flush=True)
 
@@ -173,7 +180,7 @@ def main(eval_cfg: DictConfig):
 
 
                     # Pairwise metrics with CIs
-                    pairwise_metrics = eval_cfg.metrics.get('which')
+                    pairwise_metrics = eval_cfg.metrics.get('pairwise_metrics')
                     if pairwise_metrics is not None: # pairwise only makes sense for reconstruction
 
                         just_save_payload = ('generation' in name)
@@ -204,15 +211,17 @@ def main(eval_cfg: DictConfig):
 
                 pprint(stylegan_results)
 
-            # Collect metric results into tables
-            for parent in inference_root.parents:
-                if parent.name in ['reconstruction', 'generation']:
-                    collect_metric_results(
-                        dir_base=parent,
-                        save_path=parent,
-                        make_tables=True,
-                    )
-
+                # Collect metric results into tables
+                for parent in inference_root.parents:
+                    if parent.name in ['reconstruction', 'generation']:
+                        collect_metric_results(
+                            dir_base=parent,
+                            save_path=parent,
+                            make_tables=True,
+                        )
+            end_t = time.perf_counter()
+            elapsed = end_t - start_t
+            print(f"[timing][metrics] {scheme}: {elapsed / 3600:.4f} hours", flush=True)
 
 
 
