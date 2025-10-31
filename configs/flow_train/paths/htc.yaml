@@ -1,0 +1,2 @@
+data_path: /data/engs-deep-learn-bio/spet4299/datasets/flow-matching
+train_output_path: /data/engs-deep-learn-bio/spet4299/projects/go-with-the-flow/hydra_outputs

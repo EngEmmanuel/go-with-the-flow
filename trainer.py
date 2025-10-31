@@ -136,11 +136,11 @@ class FlowVideoGenerator(LightningModule):
             case 'cosineannealing':
                 scheduler = CosineAnnealingLR(
                     optimizer, 
-                    T_max=self.cfg.trainer.max_epochs
+                    T_max=self.cfg.trainer.kwargs.max_epochs
                 )
             case 'linear':
                 def lr_lambda(current_epoch: int):
-                    max_epochs = self.cfg.trainer.max_epochs
+                    max_epochs = self.cfg.trainer.kwargs.max_epochs
                     return max(0.0, float(max_epochs - current_epoch) / float(max_epochs))
                 
                 scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
@@ -148,7 +148,7 @@ class FlowVideoGenerator(LightningModule):
                 raise ValueError(f"Unsupported lr_scheduler: {self.cfg.trainer.lr_scheduler}")
         
 
-        return optimizer, scheduler
+        return [optimizer], [scheduler]
     
     def maybe_drop_cond(self, batch):
         ehs = batch.get('encoder_hidden_states')  # [B, 1]
