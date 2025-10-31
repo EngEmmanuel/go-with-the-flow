@@ -9,7 +9,8 @@ tasks: ['gen_latents', 'latents_to_videos', 'compute_metrics']
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 output_dir: ${run_dir}/evaluation
 
-run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-26/09-07-39
+#run_dir: ${paths.train_output_path}/../hydra_outputs/2025-09-20/21-58-58
+run_dir: /data/spet4299/flow_matching/outputs/hydra_outputs/2025-09-20/21-58-58 
 ckpt_name: last.ckpt
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
@@ -38,7 +39,7 @@ inference_schemes:
 
 
 model_sample_kwargs:
-  guidance_scale: 5  # Classifier-free guidance scale; set to 1.0 for no guidance
+  guidance_scale: 1  # Classifier-free guidance scale; set to 1.0 for no guidance
 
 
 ## LATENT-TO-VIDEO PARAMETERS

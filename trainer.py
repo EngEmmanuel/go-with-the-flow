@@ -1,4 +1,5 @@
 
+from sched import scheduler
 import torch
 import wandb 
 import hydra
@@ -6,6 +7,7 @@ from omegaconf import DictConfig, OmegaConf
 from torch import Tensor
 from torch.nn import Module, ModuleList
 import torch.optim as optim
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import DataLoader
 from pathlib import Path
 from typing import Literal, Callable
@@ -15,11 +17,7 @@ from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 from lightning.pytorch.utilities import rank_zero_only
 #from lightning.callbacks.weight_averaging import WeightAveraging
 
-from my_src.jvp_model import JVPFlashAttnProcessor
-
-
-#from my_src.models import UNetSTIC, DiffuserSTDiT
-from my_src.jvp_model import UNet3D
+from my_src.model import UNet3D
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
 from my_src.flows import LinearFlow, MeanFlow
@@ -132,7 +130,25 @@ class FlowVideoGenerator(LightningModule):
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
-        return optimizer
+        match self.cfg.trainer.get('lr_scheduler', 'none').lower():
+            case 'none':
+                return optimizer
+            case 'cosineannealing':
+                scheduler = CosineAnnealingLR(
+                    optimizer, 
+                    T_max=self.cfg.trainer.max_epochs
+                )
+            case 'linear':
+                def lr_lambda(current_epoch: int):
+                    max_epochs = self.cfg.trainer.max_epochs
+                    return max(0.0, float(max_epochs - current_epoch) / float(max_epochs))
+                
+                scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+            case _:
+                raise ValueError(f"Unsupported lr_scheduler: {self.cfg.trainer.lr_scheduler}")
+        
+
+        return optimizer, scheduler
     
     def maybe_drop_cond(self, batch):
         ehs = batch.get('encoder_hidden_states')  # [B, 1]
@@ -247,7 +263,6 @@ def main(cfg: DictConfig):
 
     # Load model and flow wrapper
     model = load_model(cfg, dummy_data, device)
-    model.set_attn_processor(JVPFlashAttnProcessor())
     model = load_flow(cfg, model)
     model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
 

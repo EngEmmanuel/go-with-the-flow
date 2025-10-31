@@ -2,4 +2,3 @@ type: mean
 kwargs:
   add_recon_loss: true
   recon_loss_weight: 1.0
-  use_jvp_flash_attn: true

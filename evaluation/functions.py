@@ -95,7 +95,7 @@ def load_model_from_run(run_dir: str | Path, dummy_data: dict, ckpt_name: Option
 		else:
 			with torch.no_grad():
 				model.null_ehs.copy_(null_tensor)
-	print(f'\n\n null_ehs value: {model.null_ehs} \n\n')
+	print(f'\n\n null_ehs value: {null_tensor} \n\n')
 	# Load only matching keys
 	missing, unexpected = model.load_state_dict(cleaned, strict=False)
 	if missing:

@@ -40,8 +40,7 @@ class MeanFlow(Module):
         add_recon_loss = False,
         recon_loss_weight = 1.,
         noise_std_dev = 1.,
-        eps = 1e-3,
-        use_jvp_flash_attn = True,
+        eps = 1e-3
     ):
         super().__init__()
         self.model = model 
@@ -83,8 +82,6 @@ class MeanFlow(Module):
             recon_loss_weight=recon_loss_weight
         )
 
-        # jvp context
-        self.jvp_context = nullcontext() if use_jvp_flash_attn else sdpa_kernel(SDPBackend.MATH)
 
     @property
     def device(self):
@@ -279,7 +276,7 @@ class MeanFlow(Module):
             )
         else:
             # Algorithm 1
-            with self.jvp_context:
+            with sdpa_kernel(SDPBackend.MATH):
                 pred, rate_avg_vel_change = jvp(
                     self.model,
                     inputs,

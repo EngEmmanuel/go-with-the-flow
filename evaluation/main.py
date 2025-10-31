@@ -26,7 +26,7 @@ print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
 
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="full_eval_cfg")
+@hydra.main(version_base=None, config_path="configs", config_name="debug_full_eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
     if not tasks:

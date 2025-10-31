@@ -1,2 +1,2 @@
 data_path: /users/spet4299/code/TEE/flow-matching/go-with-the-flow/data
-train_output_path: ${oc.env:DATA}/go-with-the-flow/jvp_outputs
+train_output_path: ${oc.env:DATA}/flow-matching/go-with-the-flow/outputs
