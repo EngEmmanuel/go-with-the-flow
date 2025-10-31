@@ -126,6 +126,7 @@ def main():
     parser.add_argument("--size", type=int, default=112, help="Resolution to resize frames before passing to VAE (H and W)")
     parser.add_argument("--device", type=str, default=None, help="device: cuda, mps, cpu (auto if not set)")
     parser.add_argument("--force_cpu", action="store_true", help="force use of CPU")
+    parser.add_argument("--save_orig", action="store_true", help="also save original resized images")
     args = parser.parse_args()
 
     device = select_device(force_cpu=args.force_cpu) if args.device is None else torch.device(args.device)
@@ -165,14 +166,22 @@ def main():
                 print(f" -> extracted {frames.shape[0]} frames")
                 orig_dir = Path(args.out_dir) / 'original' / pth.stem
                 recon_dir = Path(args.out_dir) / 'reconstruction' / pth.stem
-                orig_dir.mkdir(parents=True, exist_ok=True)
+                if args.save_orig:
+                    orig_dir.mkdir(parents=True, exist_ok=True)
                 recon_dir.mkdir(parents=True, exist_ok=True)
                 for i in tqdm(range(frames.shape[0]), desc=f"Video: {pth.stem}", unit="frame"):
                     frame = frames[i]
                     pil = Image.fromarray(frame)
-                    # save original frame
-                    orig_file = orig_dir / f"frame_{i+1}.png"
-                    pil.save(orig_file)
+                    if args.save_orig: # Match real preprocessing to how proccessor resizes synth
+                        pil_orig = pil.resize(
+                            (args.size, args.size),
+                            resample=Image.Resampling.LANCZOS
+                        )
+                        # save original frame
+                        orig_file = orig_dir / f"frame_{i+1}.png"
+                        pil_orig.save(orig_file)
+
+                    #print(processor.config.resample)
 
                     x = processor.preprocess(pil, height=args.size, width=args.size).to(device)
 
@@ -224,3 +233,4 @@ def main():
 if __name__ == "__main__":
     print(os.getcwd())
     main()
+    #python load_vae_reconstruct.py --vae_dir 'HReynaud/EchoFlow' --subfolder 'vae/avae-4f4' --inputs "data/CAMUS_Processed/**/patient*.mp4" --out_dir experiments/vae/datasets/CAMUS_Processed/4f4/reconstructions --size 112
