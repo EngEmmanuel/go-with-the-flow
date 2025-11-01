@@ -1,6 +1,6 @@
 defaults:
   - _self_ # First takes priority so any properties redefined here take precedence
-  - model: hr_unet
+  - model: unet
   - flow: mean
   - paths: ibme # Simply override in cli call
 
@@ -22,7 +22,7 @@ vae:
 
 trainer:
   lr: 1e-4
-  lr_scheduler: CosineAnnealing
+  #lr_scheduler: CosineAnnealing
   loss_mask: pad
   uncond_prob: 0.0
   kwargs:
@@ -34,12 +34,12 @@ trainer:
     #profiler: simple
     #overfit_batches: 0.1 #debug
 
-#ema:
-#  kwargs:
-#    decay: 0.999
-#    start_step: 100
-#    every_n_steps: 10
-#    use_buffers: true
+ema:
+  kwargs:
+    decay: 0.9999
+    start_step: 100
+    every_n_steps: 10
+    use_buffers: true
 
 
 sample_every_n_val_steps: 800
