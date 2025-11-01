@@ -106,7 +106,7 @@ def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latent
     """Evaluate model on list of DataLoaders and save latent videos and metadata."""
 
     Cc, T, H, W = dl_list[0].dataset[0]['cond_image'].shape
-    C = int(run_cfg.vae.resolution[0])
+    C = int(run_cfg.vae.resolution.split('f')[0])
     data_shape = (C, T, H, W)
 
     metadata_df_rows = []
@@ -143,7 +143,7 @@ def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latent
                     'not_pad_mask': reference_batch['not_pad_mask'][i].tolist(),
                 })
                 stitched_video = stitch_video(
-                    input_video=reference_batch['cond_image'][i].cpu()[:4]/run_cfg.vae.scaling_factor,
+                    input_video=reference_batch['cond_image'][i].cpu()[:C]/run_cfg.vae.scaling_factor,
                     output_video=video,
                     observed_mask=reference_batch['observed_mask'][i].tolist(),
                     not_pad_mask=reference_batch['not_pad_mask'][i].tolist()
@@ -165,7 +165,7 @@ def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latent
 def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, latents_dir):
     """Evaluate model on list of DataLoaders and save latent videos and metadata.csv."""
     Cc, T, H, W = dl_list[0].dataset[0]['cond_image'].shape
-    C = int(run_cfg.vae.resolution[0])
+    C = int(run_cfg.vae.resolution.split('f')[0])
     data_shape = (C, T, H, W)
 
     metadata_df_rows = []
@@ -201,7 +201,7 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
                     'not_pad_mask': reference_batch['not_pad_mask'].tolist()
                 })
                 stitched_video = stitch_video(
-                    input_video=reference_batch['cond_image'].cpu()[:4]/run_cfg.vae.scaling_factor,
+                    input_video=reference_batch['cond_image'].cpu()[:C]/run_cfg.vae.scaling_factor,
                     output_video=video,
                     observed_mask=reference_batch['observed_mask'].tolist(),
                     not_pad_mask=reference_batch['not_pad_mask'].tolist()

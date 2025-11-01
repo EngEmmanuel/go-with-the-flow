@@ -10,7 +10,7 @@ real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 output_dir: ${run_dir}/evaluation
 
 #run_dir: ${paths.train_output_path}/../hydra_outputs/2025-09-20/21-58-58
-run_dir: /data/spet4299/flow_matching/outputs/hydra_outputs/2025-09-20/21-58-58 
+run_dir: /data/spet4299/flow-matching/go-with-the-flow/outputs/hydra_outputs/test_max_size/2025-11-01/20-29-46
 ckpt_name: last.ckpt
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
@@ -38,8 +38,8 @@ inference_schemes:
   #  
 
 
-model_sample_kwargs:
-  guidance_scale: 1  # Classifier-free guidance scale; set to 1.0 for no guidance
+#model_sample_kwargs:
+#  guidance_scale: 1  # Classifier-free guidance scale; set to 1.0 for no guidance
 
 
 ## LATENT-TO-VIDEO PARAMETERS

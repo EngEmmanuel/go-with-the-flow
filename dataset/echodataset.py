@@ -120,6 +120,8 @@ class EchoDataset(Dataset):
             case 'geometric':
                 p = 8/T
                 val = T - np.random.geometric(p)
+            case '1-frame':
+                val = max_frames_removed
 
         return np.clip(val, min_frames_removed, max_frames_removed, dtype=int)
 

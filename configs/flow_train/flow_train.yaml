@@ -22,7 +22,7 @@ vae:
 
 trainer:
   lr: 1e-4
-  #lr_scheduler: CosineAnnealing
+  lr_scheduler: constant
   loss_mask: pad
   uncond_prob: 0.0
   kwargs:
@@ -30,7 +30,7 @@ trainer:
     precision: 16
     accelerator: auto
     val_check_interval: 0.1
-    accumulate_grad_batches: 5
+    accumulate_grad_batches: 3
     #profiler: simple
     #overfit_batches: 0.1 #debug
 
@@ -38,7 +38,7 @@ ema:
   kwargs:
     decay: 0.9999
     start_step: 100
-    every_n_steps: 10
+    every_n_steps: 5
     use_buffers: true
 
 

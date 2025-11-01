@@ -192,7 +192,7 @@ def convert_latents_directory(
     types: Optional[List[str]] = None,
     fps: int = 16,
     fps_metadata_csv: Optional[Path] = None,
-    decode_batch_size: int = 16,
+    decode_batch_size: int = 32,
     device: Optional[torch.device] = None,
     debugging: bool = False,
 
@@ -273,8 +273,12 @@ def convert_latents_directory(
         data = torch.load(pt_path, map_location="cpu")
         latent = data["video"]
 
+        
+
         # to (T, C, H, W)
-        frames_TCHW = _to_TCHW(latent)
+        frames_TCHW = _to_TCHW(latent, latent_channels=vae.config.latent_channels)
+
+        print('latent shape:', latent.shape, '\nframes_TCHW shape:', frames_TCHW.shape)
 
         # Decode base video (fake)
         decoded_base = _decode_frames_with_vae(vae, frames_TCHW, batch_size=decode_batch_size)
@@ -293,7 +297,7 @@ def convert_latents_directory(
         stitched_T3HW = None
         if isinstance(data, dict) and "stitched_video" in data:
             stitched_latent = data["stitched_video"]
-            stitched_TCHW = _to_TCHW(stitched_latent)
+            stitched_TCHW = _to_TCHW(stitched_latent, latent_channels=vae.config.latent_channels)
             stitched_T3HW = _decode_frames_with_vae(vae, stitched_TCHW, batch_size=decode_batch_size)
             out_frames_dir_stitched_fake = output_dir / "framewise_stitched" / "fake" / video_name
             _save_frames(stitched_T3HW, out_frames_dir_stitched_fake)

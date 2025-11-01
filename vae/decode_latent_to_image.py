@@ -50,14 +50,14 @@ def _device_from_vae(vae: torch.nn.Module) -> torch.device:
     return next(vae.parameters()).device
 
 
-def _to_TCHW(latent: torch.Tensor) -> torch.Tensor:
+def _to_TCHW(latent: torch.Tensor, latent_channels: int = None) -> torch.Tensor:
     """Convert latent video to shape (T, C, H, W) from (C,T,H,W) or already (T,C,H,W)."""
-    if latent.dim() != 4:
-        raise ValueError(f"Expected 4D latent video (C,T,H,W) or (T,C,H,W), got shape {tuple(latent.shape)}")
+    #if latent.dim() != 4:
+    #    raise ValueError(f"Expected 4D latent video (C,T,H,W) or (T,C,H,W), got shape {tuple(latent.shape)}")
 
-    # Latent C size is 4 !HARD CODING!
-    if latent.shape[0] == 4:
+    if latent.shape[0] == latent_channels:
         return latent.permute(1, 0, 2, 3).contiguous()  # (T, C, H, W)
+    
     # Else assume it's already (T, C, H, W)
     return latent
 
@@ -125,7 +125,7 @@ def _save_video_cv2(video_T3HW: torch.Tensor, out_path: Path, fps: int = 16) -> 
 
 
 def _decode_and_save_single_video(vae: torch.nn.Module, latent_video: torch.Tensor, out_path: Path, fps: int = 16) -> Path:
-    frames_TCHW = _to_TCHW(latent_video)
+    frames_TCHW = _to_TCHW(latent_video, latent_channels=vae.config.latent_channels)
     decoded_T3HW = _decode_frames_with_vae(vae, frames_TCHW)
     return _save_video_cv2(decoded_T3HW, out_path, fps=fps)
 
