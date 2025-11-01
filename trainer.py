@@ -1,21 +1,15 @@
-
-from sched import scheduler
 import torch
-import wandb 
 import hydra
 from omegaconf import DictConfig, OmegaConf
-from torch import Tensor
-from torch.nn import Module, ModuleList
+from datetime import datetime, timezone
 import torch.optim as optim
 from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
 from torch.utils.data import DataLoader
 from pathlib import Path
-from typing import Literal, Callable
+
 from lightning import LightningModule, Trainer
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
-from lightning.pytorch.utilities import rank_zero_only
-#from lightning.callbacks.weight_averaging import WeightAveraging
 
 from my_src.model import UNet3D
 from dataset.testdataset import FlowTestDataset
@@ -23,7 +17,8 @@ from dataset.echodataset import EchoDataset
 from my_src.flows import LinearFlow, MeanFlow
 from dataset import make_sampling_collate
 from vae.util import load_vae_and_processor
-#from utils.ema import EMAWeightAveraging
+from utils.ema import EMAWeightAveraging
+
 
 def cycle(dl):
     while True:
@@ -53,9 +48,9 @@ class FlowVideoGenerator(LightningModule):
         super().__init__()
         self.model = model
         self.cfg = cfg
-        self.sample_dir = kwargs.get("sample_dir", None)
-        self.sample_dl = kwargs.get("sample_dl", None)
-        self.sample_dl = cycle(self.sample_dl) if self.sample_dl is not None else None
+        # self.sample_dir = kwargs.get("sample_dir", None)
+        # self.sample_dl = kwargs.get("sample_dl", None)
+        # self.sample_dl = cycle(self.sample_dl) if self.sample_dl is not None else None
 
         self._val_counter = 0
 
@@ -84,49 +79,49 @@ class FlowVideoGenerator(LightningModule):
         self.log('val_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
         return loss
 
-    def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-        if self.sample_dir is None or batch_idx != 0:
-            return
+    # def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
+    #     if self.sample_dir is None or batch_idx != 0:
+    #         return
 
-        is_sample_step = (self._val_counter % self.cfg.sample_every_n_val_steps == 0)
-        if self.trainer.is_global_zero and is_sample_step:
-            self.print(f"Sampling at step {self.global_step}")
+    #     is_sample_step = (self._val_counter % self.cfg.sample_every_n_val_steps == 0)
+    #     if self.trainer.is_global_zero and is_sample_step:
+    #         self.print(f"Sampling at step {self.global_step}")
 
-            self.mid_train_sample()
+    #         self.mid_train_sample()
 
-        # Increment counter
-        self._val_counter += 1
+    #     # Increment counter
+    #     self._val_counter += 1
 
-    @torch.no_grad()
-    def mid_train_sample(self, n_videos_per_sample=2):
+    # @torch.no_grad()
+    # def mid_train_sample(self, n_videos_per_sample=2):
 
-        self.model.eval()
-        sample_results = {}
+    #     self.model.eval()
+    #     sample_results = {}
 
-        for n in range(n_videos_per_sample):
-            reference_batch, repeated_batch = next(self.sample_dl)
-            batch_size, *_ = repeated_batch['cond_image'].shape
+    #     for n in range(n_videos_per_sample):
+    #         reference_batch, repeated_batch = next(self.sample_dl)
+    #         batch_size, *_ = repeated_batch['cond_image'].shape
 
-            repeated_batch = {k: v.to(self.device) for k, v in repeated_batch.items()}
+    #         repeated_batch = {k: v.to(self.device) for k, v in repeated_batch.items()}
 
-            sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
-            sampled_videos = sampled_videos.detach().cpu()
-            sampled_videos /= self.cfg.vae.scaling_factor
+    #         sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
+    #         sampled_videos = sampled_videos.detach().cpu()
+    #         sampled_videos /= self.cfg.vae.scaling_factor
 
-            cond_image = reference_batch['cond_image'] / self.cfg.vae.scaling_factor
-            ef_values = reference_batch['ef_values']
+    #         cond_image = reference_batch['cond_image'] / self.cfg.vae.scaling_factor
+    #         ef_values = reference_batch['ef_values']
 
-            sample_results[n] = {
-                "video_name": reference_batch['video_name'],
-                "cond_image": cond_image.contiguous(),
-                'reconstructed': (sampled_videos[0,...].contiguous(), round(ef_values[0].item(), 3)),
-                'generated': (sampled_videos[1:,...].contiguous(), [round(x.item(), 3) for x in ef_values[1:]])
-            }
+    #         sample_results[n] = {
+    #             "video_name": reference_batch['video_name'],
+    #             "cond_image": cond_image.contiguous(),
+    #             'reconstructed': (sampled_videos[0,...].contiguous(), round(ef_values[0].item(), 3)),
+    #             'generated': (sampled_videos[1:,...].contiguous(), [round(x.item(), 3) for x in ef_values[1:]])
+    #         }
 
-        torch.save(
-            sample_results, 
-            self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"
-        )
+    #     torch.save(
+    #         sample_results, 
+    #         self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"
+    #     )
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
@@ -275,8 +270,8 @@ def main(cfg: DictConfig):
     # LR monitor
     callbacks_list.append(LearningRateMonitor(logging_interval='step'))
     # EMA
-    #if 'ema' in cfg:
-    #    callbacks_list.append(EMAWeightAveraging(**cfg.ema.kwargs))
+    if 'ema' in cfg:
+        callbacks_list.append(EMAWeightAveraging(**cfg.ema.kwargs))
 
     config = OmegaConf.to_container(cfg, resolve=True)
     config.update({'local_output_dir': str(output_dir)})
@@ -294,6 +289,8 @@ def main(cfg: DictConfig):
     )
 
     # Train the model
+    utc_now = datetime.now(timezone.utc)
+    print(utc_now.strftime("%A, %d %B %Y, %H:%M:%S %Z"))
     trainer.fit(model, train_dl, val_dl)
 
 if __name__ == '__main__':
