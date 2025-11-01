@@ -125,15 +125,15 @@ class FlowVideoGenerator(LightningModule):
 
     def configure_optimizers(self):
         optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
-        match self.cfg.trainer.get('lr_scheduler', 'none').lower():
-            case 'none':
+        match self.cfg.trainer.get('lr_scheduler', None):
+            case None:
                 return optimizer
             case 'cosineannealing':
                 scheduler = CosineAnnealingLR(
                     optimizer, 
                     T_max=self.cfg.trainer.kwargs.max_epochs
                 )
-            case 'linear':
+            case 'linear_decay':
                 def lr_lambda(current_epoch: int):
                     max_epochs = self.cfg.trainer.kwargs.max_epochs
                     return max(0.0, float(max_epochs - current_epoch) / float(max_epochs))
