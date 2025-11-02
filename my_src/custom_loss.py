@@ -86,9 +86,9 @@ class MaskedMeanFlowLoss(nn.Module):
 
     def forward(
         self,
-        pred: torch.Tensor,         # (B, C, T, H, W)
-        flow: torch.Tensor,         # (B, C, T, H, W)
-        integral: torch.Tensor,     # (B, C, T, H, W)
+        pred: torch.Tensor,         # u_pred;  (B, C, T, H, W)
+        flow: torch.Tensor,         # v(_hat); (B, C, T, H, W)
+        integral: torch.Tensor,     # (t-r)*[J.(v, 0 , 1)] (B, C, T, H, W)
         loss_mask: torch.Tensor,    # (B, T) -> 1 = include, 0 = pad
         *,
         noised_data: torch.Tensor | None = None,   # for recon term
@@ -100,7 +100,7 @@ class MaskedMeanFlowLoss(nn.Module):
             total_loss (scalar) or (total_loss, (flow_loss, recon_loss))
         """
         # ----- flow loss (masked) -----
-        target = flow - integral
+        target = flow - integral # u_tgt
         per_sample_mse = self._masked_per_sample_mse(pred, target, loss_mask)  # (B,)
 
         if self.use_adaptive_loss_weight:

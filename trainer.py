@@ -146,6 +146,10 @@ class FlowVideoGenerator(LightningModule):
         return [optimizer], [scheduler]
     
     def maybe_drop_cond(self, batch):
+        #TODO: REMOVE THIS ###
+        if self.cfg.flow == 'mean': #mean flow handles its own conditioning dropout
+            return batch
+        #####
         ehs = batch.get('encoder_hidden_states')  # [B, 1]
         if self.uncond_prob <= 0.0:
             return batch

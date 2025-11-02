@@ -36,11 +36,13 @@ class MeanFlow(Module):
         use_logit_normal_sampler = True,
         logit_normal_mean = -0.4,
         logit_normal_std = 1.,
-        prob_default_flow_obj = 0.5,
+        prob_default_flow_obj = 0.75,
         add_recon_loss = False,
         recon_loss_weight = 1.,
         noise_std_dev = 1.,
-        eps = 1e-3
+        eps = 1e-3,
+        uncond_prob = 0.0,
+        w = 0,
     ):
         super().__init__()
         self.model = model 
@@ -72,6 +74,13 @@ class MeanFlow(Module):
 
         self.register_buffer('dummy', tensor(0), persistent = False)
 
+        # cfg
+        self.uncond_prob = uncond_prob
+        if self.uncond_prob > 0.:
+            self.register_parameter('null_ehs', nn.Parameter(torch.zeros(1,1))) # shape will be inferred later
+        self.w = w
+        #TODO Remove
+        print(f"Using uncond prob {self.uncond_prob} and w {self.w} in MeanFlow")
         # loss function
 
         self.loss_fn = MaskedMeanFlowLoss(
@@ -206,7 +215,7 @@ class MeanFlow(Module):
     def forward(
         self,
         x,
-        encoder_hidden_states: torch.Tensor,
+        encoder_hidden_states: torch.Tensor, #(B,1,CA_dim)
         cond_image,
         noise: Tensor | None = None,
         return_loss_breakdown = True,
@@ -253,12 +262,33 @@ class MeanFlow(Module):
         delta_times = times - integral_start_times
         padded_delta_times = append_dims(delta_times, ndim - 1)
 
+        # cfg
+        if self.uncond_prob > 0.0:
+            cfg_mask = torch.rand((batch,), device=device) < self.uncond_prob
+            encoder_hidden_states = torch.where(cfg_mask.view(batch, 1, 1), self.null_ehs, encoder_hidden_states) #(condition, true, false))
+            # u(z_t, t, t | no cond)
+            uncond_pred = self.model(
+                x=noised,
+                timestep=times,
+                encoder_hidden_states=torch.full_like(encoder_hidden_states, fill_value=self.null_ehs.item()),
+                cond_image=cond_image,
+                cond_t=times
+            )
+
+            flow_hat = self.w * flow + (1 - self.w) * uncond_pred
+
+            while cfg_mask.ndim < flow.ndim:
+                cfg_mask = cfg_mask.unsqueeze(-1)
+            flow = torch.where(cfg_mask, flow, flow_hat)
+        else:
+            pass
+
         # model forward with maybe jvp
         # input order matters as positional args are used in jvp. model forward signature:
         # (x, timestep, encoder_hidden_states, cond_image, cond_t)
         # (input, d(input)/dt)
         pairs = [
-            (noised,                flow),                                            # dz/dt = v(z, t)
+            (noised,                flow),                                            # dz/dt = v(z, t) or flow_hat if cfg
             (times,                 ones(batch, device=device, dtype=times.dtype)),   # dt/dt = 1
             (encoder_hidden_states, zeros_like(encoder_hidden_states)),               # constant
             (cond_image,            zeros_like(cond_image)),                          # constant
@@ -273,7 +303,7 @@ class MeanFlow(Module):
             pred, rate_avg_vel_change = (
                 self.model(*inputs),
                 tensor(0., device = device)
-            )
+            ) # = u, jvp
         else:
             # Algorithm 1
             with sdpa_kernel(SDPBackend.MATH):
@@ -287,7 +317,7 @@ class MeanFlow(Module):
 
         integral = padded_delta_times * rate_avg_vel_change.detach()
 
-        target = flow - integral
+        #target = flow - integral
 
         out = self.loss_fn(
             pred=pred, 
