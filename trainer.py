@@ -67,7 +67,10 @@ class FlowVideoGenerator(LightningModule):
                 setattr(self.model, 'null_ehs', None)
 
     def training_step(self, batch, batch_idx):
-        batch = self.maybe_drop_cond(batch)
+        #TODO: REMOVE THIS ###
+        if self.cfg.flow.type != 'mean': #mean flow handles its own conditioning dropout
+            batch = self.maybe_drop_cond(batch)
+        #####
         out = self.model(**batch)
         loss = self._unwrap_and_log_loss(out, "train")
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
@@ -146,10 +149,6 @@ class FlowVideoGenerator(LightningModule):
         return [optimizer], [scheduler]
     
     def maybe_drop_cond(self, batch):
-        #TODO: REMOVE THIS ###
-        if self.cfg.flow == 'mean': #mean flow handles its own conditioning dropout
-            return batch
-        #####
         ehs = batch.get('encoder_hidden_states')  # [B, 1]
         if self.uncond_prob <= 0.0:
             return batch
