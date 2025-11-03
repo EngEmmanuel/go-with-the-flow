@@ -265,6 +265,7 @@ class MeanFlow(Module):
         # cfg
         if self.uncond_prob > 0.0:
             cfg_mask = torch.rand((batch,), device=device) < self.uncond_prob
+            ehs_uncond = torch.full_like(encoder_hidden_states, fill_value=self.null_ehs.item())
             encoder_hidden_states = torch.where(cfg_mask.reshape(batch, 1, 1), self.null_ehs, encoder_hidden_states) #(condition, true, false))
             
             # u(z_t, t, t | no cond)
@@ -272,7 +273,7 @@ class MeanFlow(Module):
                 uncond_pred = self.model(
                     x=noised,
                     timestep=times,
-                    encoder_hidden_states=torch.full_like(encoder_hidden_states, fill_value=self.null_ehs.item()),
+                    encoder_hidden_states=ehs_uncond,
                     cond_image=cond_image,
                     cond_t=times
                 )

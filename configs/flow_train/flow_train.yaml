@@ -1,6 +1,6 @@
 defaults:
   - _self_ # First takes priority so any properties redefined here take precedence
-  - model: unet 
+  - model: unet
   - flow: mean
   - paths: ibme # Simply override in cli call
 

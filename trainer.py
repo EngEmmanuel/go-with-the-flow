@@ -74,6 +74,10 @@ class FlowVideoGenerator(LightningModule):
         out = self.model(**batch)
         loss = self._unwrap_and_log_loss(out, "train")
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
+
+        if getattr(self.model, 'null_ehs', None) is not None:
+            self.log("train/null_ehs_value", float(self.model.null_ehs.detach().item()),
+                on_step=True, prog_bar=False, logger=True)
         return loss
 
     def validation_step(self, batch, batch_idx):
