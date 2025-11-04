@@ -1,13 +1,14 @@
 import sys
 import json
 import time
+import yaml
 import hydra
 import subprocess
 from pathlib import Path
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from datetime import datetime
-from typing import Any, Dict
+from typing import Any, Dict, List
 from pprint import pprint
 from torch.utils.data import DataLoader
 from omegaconf import OmegaConf, DictConfig
@@ -17,6 +18,7 @@ from dataset.echodataset import EchoDataset
 from dataset.util import make_sampling_collate
 from evaluation.functions import _get_run_config, load_model_from_run
 from evaluation.ef_evaluation_schemes import generate_dls_for_evaluation_scheme, run_inference
+from evaluation.ejection_fraction_segmenter import EjectionFractionSegmenter, summarise_dfs_dict
 from evaluation.latents_to_videos import convert_latents_directory
 from evaluation.metrics import compute_metrics_for_datasets, collect_metric_results
 from utils import select_device
@@ -24,9 +26,43 @@ from utils import select_device
 
 print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
 
+def find_earlier_dir(path: Path, substring: str) -> Path:
+    i = 0
+    while path.name != substring and i < 10:
+        path = path.parent
+        i += 1
+    if i == 10:
+        raise ValueError(f"Could not find directory named {substring} in the first 10 parents of {path}")
+    return path
+
+def build_filtered_index(short_dict: Dict[str, Dict[str, str]],
+                         conditions: Dict[str, List[str]]
+                         ) -> Dict[str, Dict[str, List[str]]]:
+    """
+    For each (outer, inner, root) in short_dict, find all full paths under root
+    (using Path.rglob(glob_pat)), keep only those full paths that match any condition
+    (a condition is a list of substrings that must *all* appear in the path).
+    Return a dict with the same outer->inner keys, values are lists of kept full paths.
+    """
+    def matches_any(full_path: str) -> bool:
+        return any(all(substr in full_path for substr in cond) for cond in conditions.values())
+
+    out = {}
+    for outer, inner_map in short_dict.items():
+        out_outer = {}
+        for name, root in inner_map.items():
+            rootp = Path(root)
+            if not rootp.exists():
+                out_outer[name] = []  # or None / raise if you prefer
+                continue
+
+            if matches_any(str(rootp)):
+                out_outer[name] = rootp
+        out[outer] = out_outer
+    return out
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="full_eval_cfg")
+@hydra.main(version_base=None, config_path="configs", config_name="debug_full_eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
     if not tasks:
@@ -53,6 +89,9 @@ def main(eval_cfg: DictConfig):
         
         # Load model from run directory
         run_cfg = _get_run_config(run_dir)
+        # Make path agnostic
+        run_cfg.paths = eval_cfg.paths
+        # prepare dataloaders
         all_dataloaders = generate_dls_for_evaluation_scheme(run_cfg, eval_cfg)
 
         dummy_data = next(iter(all_dataloaders.values()))[0].dataset[0]
@@ -114,6 +153,60 @@ def main(eval_cfg: DictConfig):
             elapsed = end_t - start_t
             print(f"[timing][L2V] {scheme_name}: {elapsed / 3600:.4f} hours", flush=True)
     # Task: compute metrics (keeps stylegan-v block, adds our metrics below)
+
+    if "ef_regression" in tasks:
+        print_line_rule()
+        print(f"[info] Computing EF regression metrics for run_dir: {run_dir}", flush=True)
+
+        ef_reg_cfg = eval_cfg.get('ef_regression')
+        if decoded_videos_dir is None:
+            ef_videos_roots = ef_reg_cfg.get('ef_videos_roots', None)
+            assert ef_videos_roots is not None, "eval_cfg.ef_regression.ef_videos_roots must be set if latents_to_videos is not run here."
+
+            ef_inference_roots = {
+                scheme: {name: Path(path) for name, path in group.items()} 
+                for scheme, group in ef_videos_roots.items()
+            }
+        else:
+            conditions = ef_reg_cfg.get('conditions', None)
+            assert conditions is not None, "eval_cfg.ef_regression.conditions must be set if latents_to_videos is run here."
+
+            # Filter out unwanted paths
+            ef_inference_roots = build_filtered_index(
+                short_dict=decoded_videos_dirs,
+                conditions=conditions
+            )
+
+        dfs = {}
+        ef_segmenter = EjectionFractionSegmenter(**ef_reg_cfg.kwargs)
+
+        for scheme, group in ef_inference_roots.items():
+            for name, root in group.items():
+                for framewise_dir in ef_reg_cfg.get('framewise_dirs', ['framewise_no_pad']):
+                    df_path = ef_segmenter.run_inference(
+                        input_dir=root / 'fake' / f'{framewise_dir}'
+                    )
+                    dfs[scheme][framewise_dir][root.name] = df_path
+
+        nested_summary, tidy = summarise_dfs_dict(dfs)
+        df_results_dir = find_earlier_dir(root, scheme).parent 
+        
+        with open(
+            str(df_results_dir / f'ef_regression_summary_{datetime.now().strftime("%Y%m%d_%H%M%S")}.yaml')
+        ) as f:
+            yaml.dump(nested_summary, f, default_flow_style=False)
+
+        tidy.to_csv(
+            df_results_dir / f'ef_regression_tidy_{datetime.now().strftime("%Y%m%d_%H%M%S")}.csv'
+        )
+        a = 5
+
+
+        #{run_dir}/evaluation/decoded_videos/2025-10-23/20-50-25/ef_histogram_matching/generation/nmf50p/bin0/framewise_no_pad/fake/patient0052_2CH_ef23_nmf50p/frame_0.png
+        #{run_dir}/evaluation/decoded_videos/2025-10-23/20-50-25/ef_samples_in_range/reconstruction/nmf75p/framewise_no_pad/fake/patient0027_2CH_ef27_nmf75p/frame_0.png
+
+
+
     if "compute_metrics" in tasks:
         print_line_rule()
         metrics_cfg = eval_cfg.get('metrics')

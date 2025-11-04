@@ -1,0 +1,40 @@
+defaults:
+  - _self_ # First takes priority so any properties redefined here take precedence
+  - paths: mac # Simply override in cli call
+
+tasks: ['ef_regression']
+run_dir: ${paths.train_output_path}/hydra_outputs/2025-10-12/21-13-24
+
+evaluation_timestamp: '2025-10-03/20-37-30'  # Subdirectory under latents_dir to evaluate
+videos_root: ${run_dir}/evaluation/decoded_videos/${evaluation_timestamp} #null # Directory containing decoded videos; if null, will use output of latents_to_videos step
+
+
+ef_regression:
+  klass_kwargs:
+    dataset_number: 316
+    nnunet_env: nonewnet_v3
+    use_postprocessed: false
+    nnunet_config: 2d
+    nnunet_trainer: nnUNetTrainer
+    nnunet_plans: nnUNetPlans
+    folds: 0
+
+  ef_inference_roots:
+    ef_histogram_matching: 
+      generation_nmfmax_bin0: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin0
+      generation_nmfmax_bin1: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin1
+      generation_nmfmax_bin2: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin2
+      generation_nmfmax_bin3: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin3
+      generation_nmfmax_bin4: ${videos_root}/ef_histogram_matching/generation/nmfmax/bin4
+
+    ef_samples_in_range:
+      reconstruction_nmfmax: ${videos_root}/ef_samples_in_range/reconstruction/nmfmax
+      reconstruction_nmf75p: ${videos_root}/ef_samples_in_range/reconstruction/nmf75p
+      reconstruction_nmf50p: ${videos_root}/ef_samples_in_range/reconstruction/nmf50p
+      reconstruction_nmf25p: ${videos_root}/ef_samples_in_range/reconstruction/nmf25p
+  # Which frame dir(s) should be segmented. Default: framewise_no_pad
+  framewise_dirs: null
+
+  conditions:
+    histogram_gen_nmfmax: [bin, nmfmax]
+    reconstruction_nmfmax: [ef_samples_in_range, reconstruction, nmfmax]

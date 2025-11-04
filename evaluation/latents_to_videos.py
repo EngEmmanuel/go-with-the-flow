@@ -341,18 +341,20 @@ def convert_latents_directory(
         if "videowise" in types:
             video_fps = _get_fps(row['original_real_video_name'], fps, fps_map)
             # base
-            out_video_path = (output_dir / "videowise" / video_name).with_suffix(".mp4")
-            _make_video_with_ffmpeg(out_frames_dir_base_fake, out_video_path, fps=video_fps)
-            # stitched
-            if stitched_T3HW is not None:
-                out_video_path_stitched = (output_dir / "videowise_stitched" / video_name).with_suffix(".mp4")
-                _make_video_with_ffmpeg(out_frames_dir_stitched_fake, out_video_path_stitched, fps=video_fps)
+            if False:
+                out_video_path = (output_dir / "videowise" / video_name).with_suffix(".mp4")
+                _make_video_with_ffmpeg(out_frames_dir_base_fake, out_video_path, fps=video_fps)
             # no_pad
             out_video_path_no_pad = (output_dir / "videowise_no_pad" / video_name).with_suffix(".mp4")
             _make_video_with_ffmpeg(out_frames_dir_no_pad_fake, out_video_path_no_pad, fps=video_fps)
             # generated
-            out_video_path_generated = (output_dir / "videowise_generated" / video_name).with_suffix(".mp4")
-            _make_video_with_ffmpeg(out_frames_dir_generated_fake, out_video_path_generated, fps=video_fps)
+            if False:
+                out_video_path_generated = (output_dir / "videowise_generated" / video_name).with_suffix(".mp4")
+                _make_video_with_ffmpeg(out_frames_dir_generated_fake, out_video_path_generated, fps=video_fps)
+            # stitched
+            if stitched_T3HW is not None:
+                out_video_path_stitched = (output_dir / "videowise_stitched" / video_name).with_suffix(".mp4")
+                _make_video_with_ffmpeg(out_frames_dir_stitched_fake, out_video_path_stitched, fps=video_fps)
 
     df.to_csv(output_dir / 'metadata.csv', index=False)
     print(f"[done] Outputs saved under: {output_dir}")
