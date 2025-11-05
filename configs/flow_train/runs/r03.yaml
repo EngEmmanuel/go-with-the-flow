@@ -1,0 +1,6 @@
+trainer:
+  loss_mask: pad
+
+dataset:
+  masking_distribution: 1-frame
+  cond_pad_mask: true

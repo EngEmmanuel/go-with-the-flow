@@ -66,4 +66,4 @@ wandb:
 
 hydra:
   run:
-    dir: ${paths.train_output_path}/test_mean_flow_cfg/${now:%Y-%m-%d}/${now:%H-%M-%S}
+    dir: ${paths.train_output_path}/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}

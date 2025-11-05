@@ -1,0 +1,6 @@
+trainer:
+  loss_mask: pad_and_observed
+
+dataset:
+  masking_distribution: geometric
+  cond_pad_mask: true
