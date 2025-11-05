@@ -76,7 +76,10 @@ class MaskedMeanFlowLoss(nn.Module):
         Returns: (B,) tensor of per-sample masked means.
         """
         B, C, T, H, W = pred.shape
-        m = loss_mask.to(dtype=pred.dtype, device=pred.device)  # (B,T)
+        if loss_mask is None:
+            m = torch.ones((B, T), dtype=pred.dtype, device=pred.device)
+        else:
+            m = loss_mask.to(dtype=pred.dtype, device=pred.device)  # (B,T)
         m_exp = m[:, None, :, None, None]                        # (B,1,T,1,1)
 
         diff2 = (pred - target).pow(2) * m_exp                   # mask out pads

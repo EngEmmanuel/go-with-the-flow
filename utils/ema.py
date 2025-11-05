@@ -375,30 +375,6 @@ class WeightAveraging(Callback):
 
 
 
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
 class EMAWeightAveraging(WeightAveraging):
     def __init__(
         self,
@@ -411,8 +387,9 @@ class EMAWeightAveraging(WeightAveraging):
         self.start_step = int(start_step)
         self.every_n_steps = int(every_n_steps)
 
+        print('----- Using EMA Weight Averaging Callback -----\n')
         pprint(self.__dict__, indent=4)
-
+        print('\n----- ----------------------------------- -----')
     def should_update(self, step_idx=None, epoch_idx=None) -> bool:
         # Update on steps only; begin after start_step; then every_n_steps
         return (

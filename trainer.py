@@ -1,5 +1,6 @@
 import torch
 import hydra
+import wandb
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime, timezone
 import torch.optim as optim
@@ -59,8 +60,7 @@ class FlowVideoGenerator(LightningModule):
         self.uncond_prob = float(cfg.trainer.get('uncond_prob', 0.0))
         if self.uncond_prob > 0.0:
             if not hasattr(self.model, 'null_ehs') or getattr(self.model, 'null_ehs') is None:
-                # Register as a parameter on the flow so it persists with the flow's weights
-                self.model.register_parameter('null_ehs', torch.nn.Parameter(torch.zeros(1, 1)))  # shape [1,1]
+                self.model.register_parameter('null_ehs', torch.nn.Parameter(torch.zeros(1, 1))) 
         else:
             # Ensure attribute exists for consistency (not a Parameter)
             if not hasattr(self.model, 'null_ehs'):
@@ -74,6 +74,7 @@ class FlowVideoGenerator(LightningModule):
         out = self.model(**batch)
         loss = self._unwrap_and_log_loss(out, "train")
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
+
 
         if getattr(self.model, 'null_ehs', None) is not None:
             self.log("train/null_ehs_value", float(self.model.null_ehs.detach().item()),
@@ -168,13 +169,6 @@ class FlowVideoGenerator(LightningModule):
             null = null_param.expand_as(ehs)                  # shape-match; dtype/device handled by PL
             ehs = torch.where(m, null, ehs)                   # functional, no in-place
             batch['encoder_hidden_states'] = ehs
-
-        # log right before returning (only runs when CFG-style dropout is active)
-        if getattr(self.model, 'null_ehs', None) is not None:
-            self.log("train/null_ehs_value", float(self.model.null_ehs.detach().item()),
-                on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
-        self.log("train/ef_drop_rate", drop.float().mean().item(),
-                on_step=True, prog_bar=False, logger=True, rank_zero_only=True)
         return batch
 
     def _unwrap_and_log_loss(self, out, split: str):
@@ -248,25 +242,25 @@ def main(cfg: DictConfig):
     # Setup output directories
     output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     ckpt_dir = (output_dir / "checkpoints")
-    sample_dir = (output_dir / "sample_videos")
+    #sample_dir = (output_dir / "sample_videos")
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    sample_dir.mkdir(parents=True, exist_ok=True)
+    #sample_dir.mkdir(parents=True, exist_ok=True)
 
     # Datasets and DataLoaders
     train_ds = EchoDataset(cfg, split='train')
     val_ds = EchoDataset(cfg, split='val')
-    sample_ds = EchoDataset(cfg, split='sample', n_sample_videos=4)
+    #sample_ds = EchoDataset(cfg, split='sample', n_sample_videos=4)
 
     train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
     val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size, num_workers=4, pin_memory=True, persistent_workers=True)
-    sample_dl = DataLoader(sample_ds, batch_size=1, collate_fn=make_sampling_collate(n=4))
+    #sample_dl = DataLoader(sample_ds, batch_size=1, collate_fn=make_sampling_collate(n=4))
     dummy_data = train_ds[0]
 
 
     # Load model and flow wrapper
     model = load_model(cfg, dummy_data, device)
     model = load_flow(cfg, model)
-    model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
+    model = FlowVideoGenerator(model=model, cfg=cfg)#, sample_dir=sample_dir, sample_dl=sample_dl)
 
     # Define callbacks and logger(s)
     callbacks_list = []
@@ -276,8 +270,9 @@ def main(cfg: DictConfig):
 
     # LR monitor
     callbacks_list.append(LearningRateMonitor(logging_interval='step'))
+
     # EMA
-    if 'ema' in cfg:
+    if cfg.get('ema'):
         callbacks_list.append(EMAWeightAveraging(**cfg.ema.kwargs))
 
     config = OmegaConf.to_container(cfg, resolve=True)
