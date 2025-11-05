@@ -36,9 +36,9 @@ trainer:
 
 ema:
   kwargs:
-    decay: 0.9999
-    start_step: 100
-    every_n_steps: 5
+    decay: 0.999
+    start_step: 1
+    every_n_steps: 1
     use_buffers: true
 
 
