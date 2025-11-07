@@ -49,12 +49,6 @@ ckpt:
     filename: '{epoch}-{step}-{${ckpt.metric.monitor}:.3f}'
     save_top_k: 1
     mode: min
-  periodic:
-    filename: '{epoch}-{step}' #quote marks needed
-    monitor: epoch
-    mode: max
-    save_top_k: 2
-    every_n_epochs: 10
     save_last: True
 
   
