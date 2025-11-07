@@ -113,7 +113,8 @@ def main(eval_cfg: DictConfig):
             end_t = time.perf_counter()
             elapsed = end_t - start_t
             print(f"[timing][L2V] {scheme_name}: {elapsed / 3600:.4f} hours", flush=True)
-    # Task: compute metrics (keeps stylegan-v block, adds our metrics below)
+
+
     if "compute_metrics" in tasks:
         print_line_rule()
         metrics_cfg = eval_cfg.get('metrics')
@@ -162,7 +163,7 @@ def main(eval_cfg: DictConfig):
 
                     # Video metrics
                     vid_results_json = {}
-                    if 'stitched' in sub_dir and len(video_metrics) > 0:
+                    if ('stitched' in sub_dir) or ('no_pad' in sub_dir) and len(video_metrics) > 0:
                         vid_results_json = run_stylegan_metrics(
                             inference_root_sub=inference_root_sub,
                             stylegan_metrics=','.join(video_metrics),
@@ -233,6 +234,7 @@ def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus
         "--gpus", str(n_gpus),
         "--resolution", "112",
         "--metrics", stylegan_metrics,
+        "--use_cache", '0'
     ]
 
     try:

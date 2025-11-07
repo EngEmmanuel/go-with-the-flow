@@ -9,7 +9,7 @@ tasks: ['gen_latents', 'latents_to_videos', 'compute_metrics']
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 output_dir: ${run_dir}/evaluation
 
-#run_dir: ${paths.train_output_path}/../hydra_outputs/2025-09-20/21-58-58
+#run_dir: ${paths.train_output_path}/hydra_outputs/2025-09-20/21-58-58
 run_dir: ${paths.train_output_path}/sweep/linear/r07
 ckpt_name: last.ckpt
 
@@ -19,20 +19,20 @@ test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
 # Debugging
 debugging: true
 dataset_kwargs:
-  n_sample_videos: 4 
+  n_sample_videos: 8 
 
 ## GENERATE LATENTS i.e. Inference parameters
 inference_schemes:
   frame_upsampling:
-    batch_size: 3
+    batch_size: 4
 
-  #ef_histogram_matching:
-  #  plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan
-  #  batch_size: 4
+  ef_histogram_matching:
+    plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan
+    batch_size: 4
 
-  #ef_samples_in_range:
-  #  ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
-  #  n_ef_samples: 3  # Number of ef_gen samples per video in ef_gen_range
+  ef_samples_in_range:
+    ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
+    n_ef_samples: 1  # Number of ef_gen samples per video in ef_gen_range
 
 
   #  
@@ -50,12 +50,12 @@ queries:
   frame_upsampling:
     reconstruction_nmf50p: 'rec_or_gen == "rec" and n_missing_frames == "50p"'
 
-  #ef_histogram_matching:
-  #  generation_nmfmax_bin0: 'n_missing_frames == "max" and target_ef_bin == 0'
+  ef_histogram_matching:
+    generation_nmfmax_bin0: 'n_missing_frames == "max" and target_ef_bin == 0'
 #
-  #ef_samples_in_range:
-  #  reconstruction_nmfmax: 'rec_or_gen == "rec" and n_missing_frames == "max"'
-  #  generation_nmfmax: 'rec_or_gen == "gen" and n_missing_frames == "max"'
+  ef_samples_in_range:
+    reconstruction_nmfmax: 'rec_or_gen == "rec" and n_missing_frames == "max"'
+    generation_nmfmax: 'rec_or_gen == "gen" and n_missing_frames == "max"'
 
 ## COMPUTE METRICS
 metrics:
