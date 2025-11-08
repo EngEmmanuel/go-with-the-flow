@@ -43,13 +43,15 @@ def encode_video_to_latents(
         enc = vae.encode(video)
         mu = enc.latent_dist.mean
         var = enc.latent_dist.var
+        std = enc.latent_dist.std
 
         # move to CPU and cast to save_dtype
         mu = mu.detach().cpu().to(save_dtype)
         var = var.detach().cpu().to(save_dtype)
+        std = std.detach().cpu().to(save_dtype)
 
     out_path.parent.mkdir(parents=True, exist_ok=True)
-    torch.save({"mu": mu, "var": var}, out_path)
+    torch.save({"mu": mu, "std": std}, out_path)
 
 
 def convert_videos_dir_to_latents(
@@ -129,8 +131,9 @@ def convert_videos(
 if __name__ == "__main__":
     import os
     print('cwd:',os.getcwd())
+    vae_variant = '16f8'
     convert_videos(
-        subfolder="vae/avae-4f4",
+        subfolder=f"vae/avae-{vae_variant}",
         input_dir="data/CAMUS_Processed",
-        out_dir="data/CAMUS_Latents"
+        out_dir=f"data/CAMUS_Latents_{vae_variant}"
     )
