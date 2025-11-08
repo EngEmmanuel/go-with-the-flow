@@ -24,7 +24,7 @@ dataset_kwargs:
 ## GENERATE LATENTS i.e. Inference parameters
 inference_schemes:
   frame_upsampling:
-    batch_size: 4
+    batch_size: 32
 
   ef_histogram_matching:
     plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan

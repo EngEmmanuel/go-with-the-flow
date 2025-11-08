@@ -34,12 +34,12 @@ trainer:
     #profiler: simple
     #overfit_batches: 0.1 #debug
 
-ema:
-  kwargs:
-    decay: 0.999
-    start_step: 1
-    every_n_steps: 1
-    use_buffers: true
+#ema:
+#  kwargs:
+#    decay: 0.999
+#    start_step: 1
+#    every_n_steps: 1
+#    use_buffers: true
 
 
 sample_every_n_val_steps: 800
