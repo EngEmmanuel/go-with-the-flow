@@ -278,8 +278,6 @@ def convert_latents_directory(
         # to (T, C, H, W)
         frames_TCHW = _to_TCHW(latent, latent_channels=vae.config.latent_channels)
 
-        print('latent shape:', latent.shape, '\nframes_TCHW shape:', frames_TCHW.shape)
-
         # Decode base video (fake)
         decoded_base = _decode_frames_with_vae(vae, frames_TCHW, batch_size=decode_batch_size)
         out_frames_dir_base_fake = output_dir / "framewise" / "fake" / video_name

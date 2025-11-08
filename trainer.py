@@ -280,7 +280,7 @@ def main(cfg: DictConfig):
     logger = WandbLogger(
         **cfg.wandb,
         save_dir=str(output_dir),
-        config=OmegaConf.to_container(cfg, resolve=True)
+        config=config
     )
 
     # Instantiate trainers
