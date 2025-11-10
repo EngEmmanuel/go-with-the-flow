@@ -1,0 +1,78 @@
+defaults:
+  - _self_ # First takes priority so any properties redefined here take precedence
+  - paths: ibme # Simply override in cli call
+
+dataset:
+  path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
+  max_frames: 32
+  batch_size: 1
+  cond_pad_mask: true
+  masking_distribution: uniform
+vae:
+  resolution: 4f8
+  scaling_factors:
+    4f4: 0.108
+    4f8: 0.2232
+    16f8: 0.133
+  scaling_factor: ${vae.scaling_factors.${vae.resolution}}
+trainer:
+  lr: 0.0001
+  loss_mask: pad
+  uncond_prob: 0.0
+  kwargs:
+    max_epochs: 1000
+    precision: 32
+    accelerator: auto
+    val_check_interval: 0.1
+    accumulate_grad_batches: 4
+sample_every_n_val_steps: 800
+ckpt:
+  # keeps only the single best checkpoint according to val_loss
+  metric:
+    monitor: val_loss
+    filename: 'best-{epoch:04d}-{step}-{val_loss:.3f}'
+    save_top_k: 1
+    mode: min
+
+  # periodic saver: every 250 epochs => saves at 250, 500, 750, 1000
+  periodic:
+    filename: 'epoch-{epoch:04d}-{step}'
+    # save_top_k = -1 keeps all periodic checkpoints (so every 250 ep is retained)
+    save_top_k: -1
+    every_n_epochs: 250
+    save_last: true
+wandb:
+  project: go-with-the-flow
+  entity: engemmanuel
+  group: ${flow.type}
+model:
+  type: unet
+  kwargs:
+    down_block_types:
+    - CrossAttnDownBlockSpatioTemporal
+    - CrossAttnDownBlockSpatioTemporal
+    - DownBlockSpatioTemporal
+    up_block_types:
+    - UpBlockSpatioTemporal
+    - UpBlockSpatioTemporal
+    - CrossAttnUpBlockSpatioTemporal
+    block_out_channels:
+    - 32
+    - 64
+    - 128
+    num_attention_heads:
+    - 4
+    - 8
+    - 8
+    cross_attention_dim: 1
+    layers_per_block: 2
+    transformer_layers_per_block: 1
+flow:
+  type: mean
+  kwargs:
+    add_recon_loss: true
+    recon_loss_weight: 1.0
+
+hydra:
+  run:
+    dir: ${paths.train_output_path}/tests/${now:%Y-%m-%d}/${now:%H-%M-%S}

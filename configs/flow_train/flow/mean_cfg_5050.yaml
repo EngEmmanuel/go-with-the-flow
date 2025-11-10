@@ -1,0 +1,8 @@
+type: mean
+kwargs:
+  add_recon_loss: true
+  recon_loss_weight: 1.0
+  prob_default_flow_obj: 0.50
+  adaptive_loss_weight_p: 0.5
+  uncond_prob: 0.1
+  w: 3.0
