@@ -19,12 +19,12 @@ test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
 # Debugging
 debugging: true
 dataset_kwargs:
-  n_sample_videos: 8 
+  n_sample_videos: 99999999 # 
 
 ## GENERATE LATENTS i.e. Inference parameters
 inference_schemes:
   frame_upsampling:
-    batch_size: 32
+    batch_size: 4
 
   ef_histogram_matching:
     plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan

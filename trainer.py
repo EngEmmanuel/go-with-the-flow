@@ -237,7 +237,7 @@ def load_vae_processor(cfg, device):
     return vae, processor
 
 
-@hydra.main(version_base=None, config_path="configs/flow_train", config_name="flow_train")
+@hydra.main(version_base=None, config_path="configs/flow_train", config_name='rs_68_base') #config_name="flow_train")
 def main(cfg: DictConfig):
     # Setup output directories
     output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)

@@ -44,6 +44,7 @@ def main(eval_cfg: DictConfig):
     hydra_output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     datetime_tuple = hydra_output_dir.parts[-2:]
 
+    total_time = 0
 
     # Task: generate latents
     if "gen_latents" in tasks:
@@ -58,7 +59,7 @@ def main(eval_cfg: DictConfig):
         dummy_data = next(iter(all_dataloaders.values()))[0].dataset[0]
         model, _ = load_model_from_run(run_dir, dummy_data=dummy_data, ckpt_name=eval_cfg.get("ckpt_name"))
 
-        latents_dirs = run_inference(
+        latents_dirs, inference_time = run_inference(
             eval_cfg=eval_cfg, 
             run_cfg=run_cfg, 
             model=model, 
@@ -66,7 +67,7 @@ def main(eval_cfg: DictConfig):
             dataloaders=all_dataloaders,
             datetime_tuple=datetime_tuple
         )
-
+        total_time += inference_time
 
 
     # Task: convert latents to videos
@@ -113,6 +114,7 @@ def main(eval_cfg: DictConfig):
             end_t = time.perf_counter()
             elapsed = end_t - start_t
             print(f"[timing][L2V] {scheme_name}: {elapsed / 3600:.4f} hours", flush=True)
+            total_time += elapsed
 
 
     if "compute_metrics" in tasks:
@@ -223,6 +225,8 @@ def main(eval_cfg: DictConfig):
             end_t = time.perf_counter()
             elapsed = end_t - start_t
             print(f"[timing][metrics] {scheme}: {elapsed / 3600:.4f} hours", flush=True)
+            total_time += elapsed
+    print(f"[timing][total]: {total_time/3600:.4f} hours", flush = True)
 
 
 

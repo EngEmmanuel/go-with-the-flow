@@ -324,6 +324,7 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device, datetime_tuple=
     latents_dir = latents_dir / 'debugging' if eval_cfg.get('debugging', False) else latents_dir
     latents_dir.mkdir(parents=True, exist_ok=True)
 
+    total_time = 0
     all_latents_dirs = {}
     for scheme_name, dl_list in dataloaders.items():
         kwargs = {
@@ -360,7 +361,7 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device, datetime_tuple=
         elapsed = end_t - start_t
         # Print elapsed time in hours (fractional)
         print(f"[timing][gen_latents] {scheme_name}: {elapsed / 3600:.4f} hours", flush=True)
-
+        total_time += elapsed
         all_latents_dirs[scheme_name] = latents_dir / scheme_name
 
-    return all_latents_dirs
+    return all_latents_dirs, total_time
