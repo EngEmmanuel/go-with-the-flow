@@ -33,6 +33,12 @@ class EchoDataset(Dataset):
             n_sample_videos = kwargs['n_sample_videos']
             self.df = self.df.sample(n=min(n_sample_videos, len(self.df))).reset_index(drop=True)
 
+        # Maybe latent scaling
+        if cfg.dataset.get('normalise_latents', False):
+            scaling_path = Path(cfg.dataset.get('latent_scaling_path'))
+            scaling = torch.load(scaling_path)
+            self.mu_norm = scaling['mean']
+            self.std_norm = scaling['std']
 
         self.ef_column = kwargs.get('ef_column', 'EF_Area')
 
@@ -195,8 +201,11 @@ class EchoDataset(Dataset):
 
         stats = self._load_video(row['video_name'])
         mu, std = stats['mu'], stats['std']  # (T, C, H, W)
-
         eps = torch.randn_like(mu) if self.split != 'val' else torch.zeros_like(mu)
+
+        if self.cfg.dataset.get('normalise_latents', False):
+            mu, std = self.normalise_latents(mu, std)
+        
         z = (mu + std * eps) * self.cfg.vae.scaling_factor
         transformed_dict = self.transform(z)
 
@@ -225,6 +234,22 @@ class EchoDataset(Dataset):
             if 'target_ef' in self.df.columns:
                 inputs['target_ef_bin'] = row['target_ef_bin']
 
-            
-
+        
         return inputs
+
+
+    def normalise_latents(self, mu: torch.Tensor, std: torch.Tensor, eps: torch.Tensor | None = None, return_z: bool = False):
+        """
+        Normalise per-channel using self.mu_norm/self.std_norm.
+        Expects [T, C, H, W]. If eps is given and return_z=True, also returns scaled z.
+        """
+        if not hasattr(self, 'mu_norm') or not hasattr(self, 'std_norm'):
+            return (mu, std, None) if return_z else (mu, std)
+        mean_b = self.mu_norm.view(1, -1, 1, 1).to(device=mu.device, dtype=mu.dtype)
+        std_b = self.std_norm.view(1, -1, 1, 1).to(device=std.device, dtype=std.dtype).clamp_min(1e-6)
+        mu_n = (mu - mean_b) / std_b
+        std_n = std / std_b
+        if not return_z or eps is None:
+            return mu_n, std_n
+        z = (mu_n + std_n * eps) * self.cfg.vae.scaling_factor
+        return mu_n, std_n, z
