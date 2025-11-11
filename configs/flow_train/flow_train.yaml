@@ -6,6 +6,8 @@ defaults:
 
 dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
+  normalise_latents: true
+  latent_scaling_path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}/CAMUS_Scaling_${vae.resolution}.pt
   max_frames: 32
   batch_size: 5
   cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
