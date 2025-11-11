@@ -117,13 +117,14 @@ from typing import Optional, Tuple
 import warnings
 
 from torchvision import tv_tensors
+import torch.nn.functional as F
 
 
 # Import video loading utilities
 from utils.video_utils import load_video, resample_sequence
 
 class CAMUSVideoEF(Dataset):
-    def __init__(self, cfg, splits=["TRAIN", "VAL", "TEST"], transform=None):
+    def __init__(self, cfg, splits=["TRAIN", "VAL", "TEST"], transform=None, **kwargs):
         """
         Simplified CAMUS Video Dataset for cardiac ultrasound analysis.
         Only loads video sequences and EF values (no masks).
@@ -144,6 +145,7 @@ class CAMUSVideoEF(Dataset):
         self.target_frames = cfg.target_frames
         self.image_size = cfg.image_size
         self.preload_data = cfg.preload_data
+        self.kwargs = kwargs
 
         # Cache for preloaded data if enabled
         self._data_cache = {} if self.preload_data else None
@@ -179,7 +181,10 @@ class CAMUSVideoEF(Dataset):
             self._preload_all_data()
 
     def _preload_all_data(self):
-        """Preload all video data into memory for faster training."""
+        """Preload all video data into memory for faster training.
+        Note: store raw sequences; temporal alignment (upsample or resample) is applied in __getitem__
+        to ensure consistent behavior with current config.
+        """
         print(f"Preloading {len(self.df)} video samples into memory...")
         for i in range(len(self.df)):
             if i % 50 == 0:
@@ -190,15 +195,11 @@ class CAMUSVideoEF(Dataset):
             seq_path = self.root / vid_name / f"{vid_name}.mp4"
             
             try:
-                # Load and process video data only
+                # Load raw video data only; no temporal processing here
                 seq = load_video(seq_path, channels=self.channels)
-                
-                # Resample to target frames
-                seq_F = resample_sequence(seq, target_length=self.target_frames)
-                
                 # Store in cache
                 self._data_cache[i] = {
-                    'seq': seq_F
+                    'seq': seq
                 }
             except Exception as e:
                 warnings.warn(f"Failed to preload sample {i} ({vid_name}): {str(e)}")
@@ -245,21 +246,20 @@ class CAMUSVideoEF(Dataset):
             cached_data = self._data_cache[i]
             seq_F = cached_data['seq'].copy()  # Copy to avoid modifying cached data
         else:
-            # Load data on-demand
+            # Load data on-demand (raw sequence)
             vid_name = row.video_name
             seq_path = self.root / vid_name / f"{vid_name}.mp4"
-
-            # Load video only
             seq = load_video(seq_path, channels=self.channels)
-
-            # Resample to target frames
-            seq_F = resample_sequence(seq, target_length=self.target_frames)
+            seq_F = seq
 
         # Convert EF
-        ef = row.EF / 100.0
+        ef = row[self.config.dataset.ef_column] / 100.0
 
         # Convert numpy array to tensor with proper channel dimensions
         seq_tensor = self._convert_to_tensor(seq_F)
+
+        # Ensure temporal length equals target_frames
+        seq_tensor = self._ensure_target_length(seq_tensor)
         seq_tensor = tv_tensors.Video(seq_tensor)
 
         # Apply transforms if specified
@@ -270,4 +270,36 @@ class CAMUSVideoEF(Dataset):
         ef_tensor = torch.tensor(ef, dtype=torch.float32)
 
         return seq_tensor, ef_tensor
+
+    def _ensure_target_length(self, seq_tensor: torch.Tensor) -> torch.Tensor:
+        """
+        Ensure seq_tensor has temporal length target_frames.
+        Input: (T, C, H, W) torch tensor with raw pixel scale (0..255 floats).
+        - If temporal_upsample is True and T < target_frames: upsample along time using trilinear, keep H,W unchanged.
+        - Else: mimic prior behavior: zero-pad when T < target_frames, or evenly sample when T >= target_frames.
+        Returns (target_frames, C, H, W).
+        """
+        if seq_tensor.ndim != 4:
+            raise ValueError(f"Expected (T,C,H,W), got {tuple(seq_tensor.shape)}")
+        T, C, H, W = seq_tensor.shape
+        target = int(self.target_frames)
+
+        if T == target:
+            return seq_tensor
+
+        if self.config.dataset.temporal_upsample and T < target:
+            # Upsample only in time with trilinear, keep spatial size unchanged.
+            x = seq_tensor.permute(1, 0, 2, 3).unsqueeze(0)  # (1,C,T,H,W)
+            x_up = F.interpolate(x, size=(target, H, W), mode='trilinear', align_corners=False)
+            y = x_up.squeeze(0).permute(1, 0, 2, 3)  # (T',C,H,W)
+            return y
+
+        # Fallback: previous behavior
+        if T < target:
+            pad = torch.zeros((target - T, C, H, W), dtype=seq_tensor.dtype, device=seq_tensor.device)
+            return torch.cat([seq_tensor, pad], dim=0)
+        else:
+            # Evenly sample T -> target
+            idx = torch.linspace(0, T - 1, target, device=seq_tensor.device).round().long()
+            return seq_tensor.index_select(0, idx)
 
