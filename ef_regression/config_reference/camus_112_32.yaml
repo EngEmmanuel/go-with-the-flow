@@ -13,6 +13,7 @@ dataset:
   data_mean: 0.187211
   data_std: 0.220990
   temporal_upsample: False  # Set True to trilinear-upsample sequences shorter than target_frames along time only
+  ef_column: EF_Area  # Column name for EF values
 
 model:
   pretrained: False
