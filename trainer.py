@@ -114,7 +114,7 @@ class FlowVideoGenerator(LightningModule):
 
     #         sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
     #         sampled_videos = sampled_videos.detach().cpu()
-    #         sampled_videos /= self.cfg.vae.scaling_factor
+    #         sampled_videos /= self.cfg.vae.scaling_factor might now need to unnormalise latents using scaling
 
     #         cond_image = reference_batch['cond_image'] / self.cfg.vae.scaling_factor
     #         ef_values = reference_batch['ef_values']
