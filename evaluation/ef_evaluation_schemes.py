@@ -11,6 +11,39 @@ from typing import Dict, List, Callable, Any, Optional
 from dataset.echodataset import EchoDataset
 from dataset.util import make_sampling_collate, default_eval_collate
 from evaluation.functions import stitch_video
+from utils.util import _ensure_broadcast
+
+class UnscaleLatents:
+    """
+    Convert model-output latents (model-space) to raw VAE latents suitable for vae.decode.
+
+    Args:
+      z_model: Tensor of shape (B,C,T,H,W) or (C,T,H,W) or (C,H,W).
+      dataset: dataset object (e.g. dl.dataset) that should have .mu_norm and .std_norm (1D tensors)
+      scaling_factor: cfg.vae.scaling_factor used when producing model inputs
+
+    Returns:
+      z: tensor in the VAE's expected latent space (same shape as input z)
+    """
+    def __init__(self, run_cfg, dataset) :
+        self.vae_scaling_factor = run_cfg.vae.scaling_factor
+
+        self.mu_norm = dataset.get('mu_norm', None)
+        self.std_norm = dataset.get('std_norm', None)
+        if self.std_norm is not None:
+            self.std_norm = self.std_norm.clamp_min(1e-6)
+
+    def __call__(self, z: torch.Tensor) -> torch.Tensor:
+        z = z / self.vae_scaling_factor
+        if (self.mu_norm is None or self.std_norm is None):
+            return z
+        
+        mu_b = _ensure_broadcast(self.mu_norm, z)
+        std_b = _ensure_broadcast(self.std_norm, z)
+
+        z = z * std_b + mu_b
+        return z
+
 
 DEFAULT_BATCH_SIZE = 4
 DEFAULT_NUM_WORKERS = 2
@@ -110,6 +143,7 @@ def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latent
     data_shape = (C, T, H, W)
 
     metadata_df_rows = []
+    unscale_latents = UnscaleLatents(run_cfg, dl_list[0].dataset)
     for dl in tqdm(dl_list, total=len(dl_list), desc=f"DataLoaders: {inference_frame_upsampling.__name__}"):
         data_shape = tuple(dl.dataset[0]['x'].shape)
         n = int(dl.dataset.kwargs['masking_distribution'].split("_")[-1])
@@ -127,7 +161,7 @@ def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latent
                 **eval_cfg.get('model_sample_kwargs', {})
             ) # (B, C, T, H, W)
             sample_videos = sample_videos.detach().cpu()
-            sample_videos /= run_cfg.vae.scaling_factor 
+            sample_videos = unscale_latents(sample_videos)
 
             for i in range(batch_size):
                 video = sample_videos[i]
@@ -143,7 +177,7 @@ def inference_frame_upsampling(model, dl_list, run_cfg, eval_cfg, device, latent
                     'not_pad_mask': reference_batch['not_pad_mask'][i].tolist(),
                 })
                 stitched_video = stitch_video(
-                    input_video=reference_batch['cond_image'][i].cpu()[:C]/run_cfg.vae.scaling_factor,
+                    input_video=unscale_latents(reference_batch['cond_image'][i].cpu()[:C]),
                     output_video=video,
                     observed_mask=reference_batch['observed_mask'][i].tolist(),
                     not_pad_mask=reference_batch['not_pad_mask'][i].tolist()
@@ -169,6 +203,7 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
     data_shape = (C, T, H, W)
 
     metadata_df_rows = []
+    unscale_latents = UnscaleLatents(run_cfg, dl_list[0].dataset)
     for dl in tqdm(dl_list, total=len(dl_list), desc=f"DataLoaders: {inference_ef_samples_in_range.__name__}"):
         data_shape = tuple(dl.dataset[0]['x'].shape)
         nmf = dl.dataset.kwargs['n_missing_frames']
@@ -186,7 +221,7 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
                 **eval_cfg.get('model_sample_kwargs', {})
             ) # (n_ef_samples_in_range + 1, C, T, H, W)
             sample_videos = sample_videos.detach().cpu()
-            sample_videos /= run_cfg.vae.scaling_factor 
+            sample_videos = unscale_latents(sample_videos)
             
             for i, (ef, video) in enumerate(zip(reference_batch['ef_values'], sample_videos)):
                 ef  = round(int(100*ef.item()),2)
@@ -201,7 +236,7 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
                     'not_pad_mask': reference_batch['not_pad_mask'].tolist()
                 })
                 stitched_video = stitch_video(
-                    input_video=reference_batch['cond_image'].cpu()[:C]/run_cfg.vae.scaling_factor,
+                    input_video=unscale_latents(reference_batch['cond_image'].cpu()[:C]),
                     output_video=video,
                     observed_mask=reference_batch['observed_mask'].tolist(),
                     not_pad_mask=reference_batch['not_pad_mask'].tolist()
@@ -218,6 +253,7 @@ def inference_ef_samples_in_range(model, dl_list, run_cfg, eval_cfg, device, lat
     df = pd.DataFrame(metadata_df_rows)
     df.to_csv(latents_dir / 'metadata.csv', index=False)
     return latents_dir
+    # keep input shape
 
 
 @torch.no_grad()
@@ -229,6 +265,7 @@ def inference_ef_histogram_matching(model, dl_list, run_cfg, eval_cfg, device, l
     data_shape = (C, T, H, W)
 
     metadata_df_rows = []
+    unscale_latents = UnscaleLatents(run_cfg, dl_list[0].dataset)
     for dl in tqdm(dl_list, total=len(dl_list), desc=f"DataLoaders: {inference_ef_histogram_matching.__name__}"):
         nmf = dl.dataset.kwargs['n_missing_frames']
         nmf = f"{str(int(100*nmf))}p" if not isinstance(nmf, str) else nmf # 0.75 -> '75p', 'max' -> 'max'
@@ -245,7 +282,8 @@ def inference_ef_histogram_matching(model, dl_list, run_cfg, eval_cfg, device, l
                 **eval_cfg.get('model_sample_kwargs', {})
             ) # (B, C, T, H, W)
             sample_videos = sample_videos.detach().cpu()
-            sample_videos /= run_cfg.vae.scaling_factor 
+            sample_videos = unscale_latents(sample_videos)
+            #sample_videos /= run_cfg.vae.scaling_factor 
 
             for i in range(batch_size):
                 video = sample_videos[i]
@@ -262,7 +300,7 @@ def inference_ef_histogram_matching(model, dl_list, run_cfg, eval_cfg, device, l
                     'not_pad_mask': reference_batch['not_pad_mask'][i].tolist(),
                 })
                 stitched_video = stitch_video(
-                    input_video=reference_batch['cond_image'][i].cpu()[:C]/run_cfg.vae.scaling_factor,
+                    input_video=unscale_latents(reference_batch['cond_image'][i].cpu()[:C]),
                     output_video=video,
                     observed_mask=reference_batch['observed_mask'][i].tolist(),
                     not_pad_mask=reference_batch['not_pad_mask'][i].tolist()
@@ -280,8 +318,6 @@ def inference_ef_histogram_matching(model, dl_list, run_cfg, eval_cfg, device, l
     df.to_csv(latents_dir / 'metadata.csv', index=False)
     return latents_dir
 
-
-# -------- FUNCTIONS TO IMPORT AND RUN -------------------------
 
 # --- registry mapping config keys to functions ---
 SCHEME_REG: Dict[str, Callable[[Any, Any], List[DataLoader]]] = {
@@ -364,3 +400,8 @@ def run_inference(eval_cfg, run_cfg, model, dataloaders, device, datetime_tuple=
         all_latents_dirs[scheme_name] = latents_dir / scheme_name
 
     return all_latents_dirs
+
+
+
+
+
