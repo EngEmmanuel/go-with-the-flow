@@ -4,6 +4,7 @@ import argparse
 from datetime import datetime
 import torch
 from torch.utils.data import DataLoader
+from pathlib import Path
 from pytorch_lightning.callbacks import ModelCheckpoint
 from pytorch_lightning import seed_everything
 from pytorch_lightning.trainer import Trainer
@@ -11,7 +12,7 @@ from pytorch_lightning.callbacks import ModelCheckpoint, LearningRateMonitor
 from pytorch_lightning.loggers.wandb import WandbLogger
 
 
-sys.path.append('/users/spet4299/code/TEE/flow-matching/go-with-the-flow')
+sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from ef_regression.dataset import CAMUSVideoEF #type: ignore
 from ef_regression.model import EFRegressor #type: ignore
