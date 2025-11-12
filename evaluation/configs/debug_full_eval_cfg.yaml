@@ -10,8 +10,8 @@ real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 output_dir: ${run_dir}/evaluation
 
 #run_dir: ${paths.train_output_path}/../hydra_outputs/2025-09-20/21-58-58
-run_dir: ${paths.train_output_path}/sweep/linear/r07
-ckpt_name: last.ckpt
+run_dir: ${paths.train_output_path}/sweep_no_sf/mean/r02
+ckpt_name: epoch=140-step=7597-val_loss=0.655.ckpt
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
 

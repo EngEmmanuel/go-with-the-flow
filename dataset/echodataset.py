@@ -40,6 +40,10 @@ class EchoDataset(Dataset):
             self.mu_norm = scaling['mean']
             self.std_norm = scaling['std']
 
+            print('Latent normalisation stats loaded:')
+            print('mu_norm\n', self.mu_norm)
+            print('std_norm\n', self.std_norm)
+
         self.ef_column = kwargs.get('ef_column', 'EF_Area')
 
         # Get data shape
@@ -238,18 +242,15 @@ class EchoDataset(Dataset):
         return inputs
 
 
-    def normalise_latents(self, mu: torch.Tensor, std: torch.Tensor, eps: torch.Tensor | None = None, return_z: bool = False):
+    def normalise_latents(self, mu: torch.Tensor, std: torch.Tensor):
         """
         Normalise per-channel using self.mu_norm/self.std_norm.
-        Expects [T, C, H, W]. If eps is given and return_z=True, also returns scaled z.
+        Expects [T, C, H, W]. 
         """
         if not hasattr(self, 'mu_norm') or not hasattr(self, 'std_norm'):
-            return (mu, std, None) if return_z else (mu, std)
+            return (mu, std)
         mean_b = self.mu_norm.view(1, -1, 1, 1).to(device=mu.device, dtype=mu.dtype)
         std_b = self.std_norm.view(1, -1, 1, 1).to(device=std.device, dtype=std.dtype).clamp_min(1e-6)
         mu_n = (mu - mean_b) / std_b
         std_n = std / std_b
-        if not return_z or eps is None:
-            return mu_n, std_n
-        z = (mu_n + std_n * eps) * self.cfg.vae.scaling_factor
-        return mu_n, std_n, z
+        return mu_n, std_n

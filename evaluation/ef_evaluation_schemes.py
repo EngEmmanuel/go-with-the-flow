@@ -18,7 +18,7 @@ class UnscaleLatents:
     Convert model-output latents (model-space) to raw VAE latents suitable for vae.decode.
 
     Args:
-      z_model: Tensor of shape (B,C,T,H,W) or (C,T,H,W) or (C,H,W).
+      z_model: Tensor of shape (B,C,T,H,W) or (C,T,H,W).
       dataset: dataset object (e.g. dl.dataset) that should have .mu_norm and .std_norm (1D tensors)
       scaling_factor: cfg.vae.scaling_factor used when producing model inputs
 
@@ -27,11 +27,21 @@ class UnscaleLatents:
     """
     def __init__(self, run_cfg, dataset) :
         self.vae_scaling_factor = run_cfg.vae.scaling_factor
+        self.mu_norm = None
+        self.std_norm = None
 
-        self.mu_norm = dataset.get('mu_norm', None)
-        self.std_norm = dataset.get('std_norm', None)
-        if self.std_norm is not None:
-            self.std_norm = self.std_norm.clamp_min(1e-6)
+        normalise_latents = run_cfg.dataset.get('normalise_latents', False)
+        if normalise_latents:
+            assert (hasattr(dataset, 'mu_norm') and hasattr(dataset, 'std_norm')), \
+                "normalise_latents=true, mu_norm and std_norm must be provided in the dataset."
+            assert ((dataset.mu_norm is not None) and (dataset.std_norm is not None)), \
+                "normalise_latents=true, mu_norm and std_norm in the dataset cannot be None."
+
+            self.mu_norm = dataset.mu_norm
+            self.std_norm = dataset.std_norm.clamp_min(1e-6)
+            print('[info] Latents will be un-normalized using dataset mu and std...')
+
+
 
     def __call__(self, z: torch.Tensor) -> torch.Tensor:
         z = z / self.vae_scaling_factor
