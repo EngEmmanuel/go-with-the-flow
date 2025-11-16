@@ -145,6 +145,8 @@ class CAMUSVideoEF(Dataset):
         self.target_frames = cfg.target_frames
         self.image_size = cfg.image_size
         self.preload_data = cfg.preload_data
+        self.ef_column = cfg.ef_column
+        self.temporal_upsample = cfg.get("temporal_upsample", False)
         self.kwargs = kwargs
 
         # Cache for preloaded data if enabled
@@ -253,7 +255,7 @@ class CAMUSVideoEF(Dataset):
             seq_F = seq
 
         # Convert EF
-        ef = row[self.config.dataset.ef_column] / 100.0
+        ef = row[self.ef_column] / 100.0
 
         # Convert numpy array to tensor with proper channel dimensions
         seq_tensor = self._convert_to_tensor(seq_F)
@@ -287,7 +289,7 @@ class CAMUSVideoEF(Dataset):
         if T == target:
             return seq_tensor
 
-        if self.config.dataset.temporal_upsample and T < target:
+        if self.temporal_upsample and T < target:
             # Upsample only in time with trilinear, keep spatial size unchanged.
             x = seq_tensor.permute(1, 0, 2, 3).unsqueeze(0)  # (1,C,T,H,W)
             x_up = F.interpolate(x, size=(target, H, W), mode='trilinear', align_corners=False)
