@@ -2,9 +2,11 @@ from __future__ import annotations
 
 from datetime import datetime
 import re
+import sys
 import math
 import json
 import yaml
+import subprocess
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple, Union
 
@@ -82,6 +84,48 @@ def _lpips_vgg(metric_net, img1: torch.Tensor, img2: torch.Tensor) -> float:
     return float(d.squeeze().detach().cpu().item())
 
 
+def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus: int) -> Dict[str, Any]:
+    cmd = [
+        "python", "src/scripts/calc_metrics_for_dataset.py",
+        "--real_data_path", str(inference_root_sub / "real"),
+        "--fake_data_path", str(inference_root_sub / "fake"),
+        "--gpus", str(n_gpus),
+        "--resolution", "112",
+        "--metrics", stylegan_metrics,
+        "--use_cache", '0'
+    ]
+
+    try:
+        cp = subprocess.run(cmd, cwd="stylegan-v", text=True, capture_output=True, check=True)
+    except subprocess.CalledProcessError as e:
+        # Print what you would have seen, then re-raise
+        if e.stdout: print(e.stdout, end="")
+        if e.stderr: print(e.stderr, end="", file=sys.stderr)
+        raise
+
+    # Print everything you would have seen
+    if cp.stdout: print(cp.stdout, end="")
+    if cp.stderr: print(cp.stderr, end="", file=sys.stderr)
+
+    # Look for the last JSON line in stdout, then stderr
+    res_list = []
+    for stream in (cp.stdout, cp.stderr):
+        for line in reversed((stream or "").splitlines()):
+            s = line.strip()
+            if s.startswith('{"results":') and s.endswith('}'):
+                res_list.append(json.loads(s))
+    
+    # if it returns results separately
+    if len(res_list) > 1:
+        base_res = res_list[0]
+        for res in res_list[1:]:
+            base_res['results'].update(res['results'])
+
+        return base_res
+    else:
+        return res_list[0]
+
+
 def _conf_int(values: List[float], confidence: float = 0.95) -> Tuple[float, float, float]:
     import statistics
     n = len(values)
@@ -157,7 +201,6 @@ def get_real_and_fake_video_folders(
 def compute_metrics_for_datasets(
     inference_root: Path,
     metrics: List[str],
-    output_dir: Path,
     confidence: float = 0.95,
     resize: Optional[Tuple[int, int]] = None,
     device: Optional[torch.device] = None,
@@ -169,8 +212,6 @@ def compute_metrics_for_datasets(
 ) -> Dict[str, Path]:
     real_root = inference_root / 'real'
     fake_root = inference_root / 'fake'
-    output_dir = Path(output_dir)
-    output_dir.mkdir(parents=True, exist_ok=True)
 
     # Support multiple globs: normalize to lists
     real_globs: List[str] = [real_glob] if isinstance(real_glob, str) else list(real_glob)
@@ -296,12 +337,14 @@ def compute_metrics_for_datasets(
         **payload_kwargs,
         'summary': summary_rows,
     }
-    OmegaConf.save(config=OmegaConf.create(payload), f=str(result_yaml))
+    results = OmegaConf.create(payload)
+    OmegaConf.save(config=results, f=str(result_yaml))
 
     return {
         'result_yaml': result_yaml,
         'per_video_csv': per_video_csv,
         'out_dir': out_dir,
+        'results': results,
     }
 
 

@@ -197,7 +197,6 @@ def main(eval_cfg: DictConfig):
                         out_paths = compute_metrics_for_datasets(
                             inference_root=inference_root_sub,
                             metrics=pairwise_metrics,
-                            output_dir=Path(eval_cfg.output_dir),
                             confidence=confidence,
                             resize=resize,
                             device=device,

@@ -1,3 +1,6 @@
+import sys
+import json
+import subprocess
 import pandas as pd
 
 from tqdm import tqdm
@@ -8,7 +11,8 @@ import torch
 from omegaconf import OmegaConf
 
 from utils.util import select_device
-from trainer import load_model, load_flow, FlowVideoGenerator
+from utils.train import load_model, load_flow
+
 
 def _find_checkpoint(ckpt_dir: Path, ckpt_name: Optional[str] = None) -> Path:
 	if ckpt_name:
