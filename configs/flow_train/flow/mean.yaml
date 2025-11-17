@@ -4,3 +4,7 @@ kwargs:
   recon_loss_weight: 1.0
   prob_default_flow_obj: 0.75
   adaptive_loss_weight_p: 0.5
+
+sample_kwargs:
+  steps: 1
+
