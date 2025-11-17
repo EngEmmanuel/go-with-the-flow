@@ -2,3 +2,6 @@ type: linear
 kwargs:
   clip_values: null #[-.inf, .inf]
   clip_flow_values: null # [-.inf, .inf] 
+
+sample_kwargs:
+  steps: 1

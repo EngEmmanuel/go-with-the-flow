@@ -84,7 +84,7 @@ class EchoDataset(Dataset):
         T = video.shape[0]
 
         # Allow specifying a fixed number or proportion of frames to mask
-        if self.split != 'test':
+        if (self.split in ['train', 'val']):
             n_missing_frames = self.missing_frame_distribution(T, dist=dist)
             # Sample frame indices to mask
             mask_indices = random.sample(range(T), n_missing_frames)
@@ -95,7 +95,7 @@ class EchoDataset(Dataset):
             keep_idx = list(range(0, T, n + 1))
             all_idx = set(range(T))
             mask_indices = sorted(all_idx - set(keep_idx))
-        else:
+        else: # also catches sample split
             n_missing_frames = self.kwargs.get('n_missing_frames')
             if isinstance(n_missing_frames, int): # if int, it's a fixed number of frames
                 n_missing_frames = n_missing_frames
@@ -154,7 +154,7 @@ class EchoDataset(Dataset):
 
         outputs = {"z": z, "cond": cond}
 
-        if self.split == 'test':
+        if self.split in ['sample', 'test']:
             observed_mask, _ = self.resample_sequence(observed_mask, target_length=self.cfg.dataset.max_frames)
             not_pad_mask = 1. - pad_mask[..., 0, 0, 0]
 

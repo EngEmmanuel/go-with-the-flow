@@ -1,10 +1,9 @@
 import torch
 import hydra
-import wandb
 from omegaconf import DictConfig, OmegaConf
 from datetime import datetime, timezone
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, LinearLR, SequentialLR
 from torch.utils.data import DataLoader
 from pathlib import Path
 
@@ -12,14 +11,12 @@ from lightning import LightningModule, Trainer
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
-from my_src.model import UNet3D
+from my_src.custom_callbacks import SampleAndCheckpointCallback
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
-from my_src.flows import LinearFlow, MeanFlow
-from dataset import make_sampling_collate
-from vae.util import load_vae_and_processor
+from dataset import default_eval_collate
 from utils.ema import EMAWeightAveraging
-
+from utils.train import load_model, load_flow
 
 def cycle(dl):
     while True:
@@ -49,15 +46,9 @@ class FlowVideoGenerator(LightningModule):
         super().__init__()
         self.model = model
         self.cfg = cfg
-        # self.sample_dir = kwargs.get("sample_dir", None)
-        # self.sample_dl = kwargs.get("sample_dl", None)
-        # self.sample_dl = cycle(self.sample_dl) if self.sample_dl is not None else None
-
-        self._val_counter = 0
 
         # Classifier-free guidance (CFG): register the learnable null EF embedding
-        # on the FLOW MODULE (so it is saved in the flow checkpoint and available at inference).
-        self.uncond_prob = float(cfg.trainer.get('uncond_prob', 0.0))
+        self.uncond_prob = cfg.trainer.get('uncond_prob', 0.0)
         if self.uncond_prob > 0.0:
             if not hasattr(self.model, 'null_ehs') or getattr(self.model, 'null_ehs') is None:
                 self.model.register_parameter('null_ehs', torch.nn.Parameter(torch.zeros(1, 1))) 
@@ -67,95 +58,90 @@ class FlowVideoGenerator(LightningModule):
                 setattr(self.model, 'null_ehs', None)
 
     def training_step(self, batch, batch_idx):
-        #TODO: REMOVE THIS ###
-        if self.cfg.flow.type != 'mean': #mean flow handles its own conditioning dropout
-            batch = self.maybe_drop_cond(batch)
-        #####
+        #CFG
+        batch = self.maybe_drop_cond(batch)
+
         out = self.model(**batch)
+
         loss = self._unwrap_and_log_loss(out, "train")
+
         self.log('train_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
-
-
         if getattr(self.model, 'null_ehs', None) is not None:
             self.log("train/null_ehs_value", float(self.model.null_ehs.detach().item()),
                 on_step=True, prog_bar=False, logger=True)
+            
         return loss
 
     def validation_step(self, batch, batch_idx):
         out = self.model(**batch)
+
         loss = self._unwrap_and_log_loss(out, "val")
+
         self.log('val_loss', loss, prog_bar=True, on_step=True, on_epoch=True)
+
         return loss
 
-    # def on_validation_batch_end(self, outputs, batch, batch_idx, dataloader_idx=0):
-    #     if self.sample_dir is None or batch_idx != 0:
-    #         return
-
-    #     is_sample_step = (self._val_counter % self.cfg.sample_every_n_val_steps == 0)
-    #     if self.trainer.is_global_zero and is_sample_step:
-    #         self.print(f"Sampling at step {self.global_step}")
-
-    #         self.mid_train_sample()
-
-    #     # Increment counter
-    #     self._val_counter += 1
-
-    # @torch.no_grad()
-    # def mid_train_sample(self, n_videos_per_sample=2):
-
-    #     self.model.eval()
-    #     sample_results = {}
-
-    #     for n in range(n_videos_per_sample):
-    #         reference_batch, repeated_batch = next(self.sample_dl)
-    #         batch_size, *_ = repeated_batch['cond_image'].shape
-
-    #         repeated_batch = {k: v.to(self.device) for k, v in repeated_batch.items()}
-
-    #         sampled_videos = self.model.sample(**repeated_batch, batch_size=batch_size)
-    #         sampled_videos = sampled_videos.detach().cpu()
-    #         sampled_videos /= self.cfg.vae.scaling_factor might now need to unnormalise latents using scaling
-
-    #         cond_image = reference_batch['cond_image'] / self.cfg.vae.scaling_factor
-    #         ef_values = reference_batch['ef_values']
-
-    #         sample_results[n] = {
-    #             "video_name": reference_batch['video_name'],
-    #             "cond_image": cond_image.contiguous(),
-    #             'reconstructed': (sampled_videos[0,...].contiguous(), round(ef_values[0].item(), 3)),
-    #             'generated': (sampled_videos[1:,...].contiguous(), [round(x.item(), 3) for x in ef_values[1:]])
-    #         }
-
-    #     torch.save(
-    #         sample_results, 
-    #         self.sample_dir / f"sampled_videos_step_{self.global_step}.pt"
-    #     )
-
     def configure_optimizers(self):
-        optimizer = optim.Adam(self.parameters(), lr = self.cfg.trainer.lr)
+        warmup_epochs = int(self.cfg.trainer.get("warmup_epochs", 0))
+        start_factor = float(self.cfg.trainer.get("warmup_start_factor", 0.01))
+        total_epochs = int(self.cfg.trainer.kwargs.max_epochs)
+        lr = self.cfg.trainer.lr
+
+        optimizer = optim.Adam(self.parameters(), lr = lr)
+
         match self.cfg.trainer.get('lr_scheduler', None):
-            case None:
-                return optimizer
-            case 'cosineannealing':
-                scheduler = CosineAnnealingLR(
-                    optimizer, 
-                    T_max=self.cfg.trainer.kwargs.max_epochs
-                )
-            case 'linear_decay':
-                def lr_lambda(current_epoch: int):
-                    max_epochs = self.cfg.trainer.kwargs.max_epochs
-                    return max(0.0, float(max_epochs - current_epoch) / float(max_epochs))
+            case None: # constant lr
+                if warmup_epochs > 0: # constant lr with warmup
+                    scheduler = LinearLR(
+                        optimizer,
+                        start_factor=start_factor,
+                        end_factor=1.0,
+                        total_iters=warmup_epochs
+                    )
+                    return [optimizer], [scheduler]
                 
-                scheduler = LambdaLR(optimizer, lr_lambda=lr_lambda)
+                return optimizer
+            
+            case 'cosineannealing':
+                rem_epochs = max(1, total_epochs - warmup_epochs)
+                main_scheduler = CosineAnnealingLR(
+                    optimizer, 
+                    T_max=rem_epochs
+                )
+
+            case 'linear_decay':
+                rem_epochs = max(1, total_epochs - warmup_epochs)
+                def main_lr_lambda(epoch_in_main: int):
+                    # epoch_in_main will be 0..rem-1 after warmup
+                    return max(0.0, float(rem_epochs - epoch_in_main) / float(rem_epochs))
+                main_scheduler = LambdaLR(optimizer, lr_lambda=main_lr_lambda)
+
             case _:
                 raise ValueError(f"Unsupported lr_scheduler: {self.cfg.trainer.lr_scheduler}")
-        
+
+        # If no warmup requested, return main scheduler directly
+        if warmup_epochs <= 0:
+            scheduler = main_scheduler
+        else:
+            # Linear warmup from `start_factor * base_lr` -> `base_lr` over warmup_epochs
+            warmup_scheduler = LinearLR(
+                optimizer,
+                start_factor=start_factor,
+                end_factor=1.0,
+                total_iters=warmup_epochs
+            )
+            print(f"Using warmup for {warmup_epochs} epochs, then {self.cfg.trainer.get('lr_scheduler', 'constant')} for {total_epochs - warmup_epochs} epochs.")
+            scheduler = SequentialLR(
+                optimizer,
+                schedulers=[warmup_scheduler, main_scheduler],
+                milestones=[warmup_epochs]  # switch to main scheduler after warmup_epochs
+            )
 
         return [optimizer], [scheduler]
-    
+
     def maybe_drop_cond(self, batch):
         ehs = batch.get('encoder_hidden_states')  # [B, 1]
-        if self.uncond_prob <= 0.0:
+        if self.cfg.flow.type != 'linear' or self.uncond_prob <= 0.0:
             return batch
 
         B = ehs.shape[0]
@@ -163,10 +149,7 @@ class FlowVideoGenerator(LightningModule):
         drop = (torch.rand(B, device=ehs.device) < self.uncond_prob)  # True => drop EF
         if drop.any():
             m = drop.view(B, 1)                               # [B,1], bool
-            null_param = getattr(self.model, 'null_ehs', None)
-            if null_param is None:
-                return batch  # nothing to drop to
-            null = null_param.expand_as(ehs)                  # shape-match; dtype/device handled by PL
+            null = self.model.null_ehs.expand_as(ehs)                  # shape-match; dtype/device handled by PL
             ehs = torch.where(m, null, ehs)                   # functional, no in-place
             batch['encoder_hidden_states'] = ehs
         return batch
@@ -186,55 +169,8 @@ class FlowVideoGenerator(LightningModule):
             return loss
         return out  # assume scalar tensor
 
-def load_model(cfg, dummy_data, device):
-    if isinstance(dummy_data, dict):
-        C, T, H, W = dummy_data['x'].shape
-        Cc, _, _, _ = dummy_data['cond_image'].shape
 
-    print(f'input shape: {(C+Cc, T, H, W)}, with {Cc} cond channels')
 
-    match (cfg.model.type).lower():
-        case "unet":
-            return UNet3D(
-                sample_size=W,
-                in_channels=C + Cc, # model expects concatenated x and cond_image along channels
-                out_channels=C,
-                num_frames=T,
-                **cfg.model.kwargs
-            ).to(device)
-        case "transformer":
-            return DiffuserSTDiT(
-                input_size=(T, H, W),
-                in_channels=C + Cc,
-                out_channels=C,
-                **cfg.model.kwargs
-            ).to(device)
-    raise ValueError(f"Unsupported model type: {cfg.model.type}")
-
-# Function to load flow class
-def load_flow(cfg, model):
-    match (cfg.flow.type).lower():
-        case "linear":
-            return LinearFlow(
-                model=model,
-                **cfg.flow.get('kwargs', {})
-            )
-
-        case "mean":
-            return MeanFlow(
-                model=model,
-                **cfg.flow.get('kwargs', {})
-            )
-
-    raise ValueError(f"Unsupported flow class: {cfg.flow.type}")
-
-def load_vae_processor(cfg, device):
-    vae, processor = load_vae_and_processor(
-        repo_id=cfg.vae.repo_id,
-        subfolder=cfg.vae.subfolder,
-        device=device
-    )
-    return vae, processor
 
 
 @hydra.main(version_base=None, config_path="configs/flow_train", config_name="flow_train")
@@ -242,25 +178,25 @@ def main(cfg: DictConfig):
     # Setup output directories
     output_dir = Path(hydra.core.hydra_config.HydraConfig.get().runtime.output_dir)
     ckpt_dir = (output_dir / "checkpoints")
-    #sample_dir = (output_dir / "sample_videos")
+    sample_dir = (output_dir / "sample_videos")
     ckpt_dir.mkdir(parents=True, exist_ok=True)
-    #sample_dir.mkdir(parents=True, exist_ok=True)
+    sample_dir.mkdir(parents=True, exist_ok=True)
 
     # Datasets and DataLoaders
     train_ds = EchoDataset(cfg, split='train')
     val_ds = EchoDataset(cfg, split='val')
-    #sample_ds = EchoDataset(cfg, split='sample', n_sample_videos=4)
+    sample_ds = EchoDataset(cfg, split='sample', n_missing_frames='max')
 
     train_dl = DataLoader(train_ds, batch_size=cfg.dataset.batch_size, shuffle=True, num_workers=4, pin_memory=True, persistent_workers=True)
     val_dl = DataLoader(val_ds, batch_size=cfg.dataset.batch_size, num_workers=4, pin_memory=True, persistent_workers=True)
-    #sample_dl = DataLoader(sample_ds, batch_size=1, collate_fn=make_sampling_collate(n=4))
+    sample_dl = DataLoader(sample_ds, batch_size=8, shuffle=False, collate_fn=default_eval_collate)
     dummy_data = train_ds[0]
 
 
     # Load model and flow wrapper
     model = load_model(cfg, dummy_data, device)
     model = load_flow(cfg, model)
-    model = FlowVideoGenerator(model=model, cfg=cfg)#, sample_dir=sample_dir, sample_dl=sample_dl)
+    model = FlowVideoGenerator(model=model, cfg=cfg, sample_dir=sample_dir, sample_dl=sample_dl)
 
     # Define callbacks and logger(s)
     callbacks_list = []
@@ -275,13 +211,28 @@ def main(cfg: DictConfig):
     if cfg.get('ema'):
         callbacks_list.append(EMAWeightAveraging(**cfg.ema.kwargs))
 
+    # Train time sampling
+    if cfg.get('sample'):
+        callbacks_list.append(
+            SampleAndCheckpointCallback(
+                cfg=cfg,
+                sample_dir=sample_dir,
+                sample_dl=sample_dl,
+                checkpoint_dir=ckpt_dir,
+                debug=True
+            )
+        )
+
     config = OmegaConf.to_container(cfg, resolve=True)
     config.update({'local_output_dir': str(output_dir)})
-    logger = WandbLogger(
-        **cfg.wandb,
-        save_dir=str(output_dir),
-        config=config
-    )
+
+    logger = None
+    if cfg.get('wandb'):
+        logger = WandbLogger(
+            **cfg.wandb,
+            save_dir=str(output_dir),
+            config=config
+        )
 
     # Instantiate trainers
     trainer = Trainer(

@@ -71,7 +71,7 @@ def _load_real_frames_T3HW(real_dir: Path, resize_to: Optional[Tuple[int, int]] 
     for p in frame_paths:
         img = Image.open(p).convert('RGB')
         if resize_to is not None:
-            img = img.resize((int(resize_to[1]), int(resize_to[0])), Image.BILINEAR)  # PIL uses (W,H)
+            img = img.resize((int(resize_to[1]), int(resize_to[0])), Image.BICUBIC)  # PIL uses (W,H)
         arr = np.asarray(img).astype(np.float32) / 255.0  # H,W,3
         t = torch.from_numpy(arr).permute(2, 0, 1)  # 3,H,W
         frames.append(t)
@@ -195,13 +195,13 @@ def convert_latents_directory(
     decode_batch_size: int = 32,
     device: Optional[torch.device] = None,
     debugging: bool = False,
-
+    test_n: Optional[int] = None
 ):
     """Convert latent videos saved by evaluate_to_latents to videos/frames.
 
     - latent_dir: directory containing *.pt files and metadata.csv
     - run_dir: Hydra run directory containing .hydra/config.yaml (to derive VAE subfolder)
-    - repo_id: HF repo id for the VAE (e.g., 'HReynaud/EchoFlow')
+    - repo_id: HF repo id for the VAE
     - output_dir: where to write outputs; defaults to latent_dir.parent / 'decoded_videos'
     - types: list of 'framewise' and/or 'videowise'
     - query: pandas query string to filter metadata.csv rows
@@ -210,7 +210,6 @@ def convert_latents_directory(
     - decode_batch_size: number of frames decoded per VAE batch
     - device: torch device; auto-selected if None
     """
-    types = types or ["framewise", "videowise"]
     latents_dir = Path(latents_dir)
     run_dir = Path(run_dir)
     default_output_dir = run_dir / 'evaluation'/ 'decoded_videos' / Path('/'.join(latents_dir.parts[-3:])) / '/'.join(query['name'].split('_'))
@@ -232,10 +231,13 @@ def convert_latents_directory(
             df = df.query(query['pattern'])
         except Exception as e:
             raise ValueError(f"Invalid query '{query}': {e}")
+        
+    if test_n is not None:
+        df = df.head(min(test_n, len(df)))
+
     if df.empty:
         print("[info] No rows to process after filtering.")
         return output_dir
-
 
     # Build FPS map, optionally formatting a path template containing '{vae_res}'
     fps_csv_path = None
@@ -261,6 +263,7 @@ def convert_latents_directory(
         video_name = str(row["video_name"]) if "video_name" in row else None
         if not video_name:
             continue
+        video_fps = _get_fps(row['original_real_video_name'], fps, fps_map)
         real_video_name = row['original_real_video_name']
         real_video_path = real_video_map[real_video_name]
 
@@ -273,88 +276,94 @@ def convert_latents_directory(
         data = torch.load(pt_path, map_location="cpu")
         latent = data["video"]
 
-        
-
         # to (T, C, H, W)
         frames_TCHW = _to_TCHW(latent, latent_channels=vae.config.latent_channels)
 
         # Decode base video (fake)
         decoded_base = _decode_frames_with_vae(vae, frames_TCHW, batch_size=decode_batch_size)
-        out_frames_dir_base_fake = output_dir / "framewise" / "fake" / video_name
-        _save_frames(decoded_base, out_frames_dir_base_fake)
 
         # Prepare REAL frames loaded from disk, resized to match fake HxW, and resampled to T
         # decoded_base is (T, 3, H, W)
         target_H, target_W = int(decoded_base.shape[2]), int(decoded_base.shape[3])
         real_T3HW_raw = _load_real_frames_T3HW(real_video_path, resize_to=(target_H, target_W))
         real_T3HW_resampled = _resample_T3HW(real_T3HW_raw, target_length=frames_TCHW.shape[0])
-        out_frames_dir_base_real = output_dir / "framewise" / "real" / real_video_name
-        _save_frames(real_T3HW_resampled, out_frames_dir_base_real)
+
+        # Frame masks
+        not_pad_mask_list = _coerce_mask_list(row.get('not_pad_mask'), T_expected=frames_TCHW.shape[0])
+        observed_mask_list = _coerce_mask_list(row.get('observed_mask'), T_expected=frames_TCHW.shape[0])
+
+        if "framewise" in types:
+            out_frames_dir_base_fake = output_dir / "framewise" / "fake" / video_name
+            out_frames_dir_base_real = output_dir / "framewise" / "real" / real_video_name
+            _save_frames(decoded_base, out_frames_dir_base_fake)
+            _save_frames(real_T3HW_resampled, out_frames_dir_base_real)
+
+            if "videowise" in types:
+                # base
+                out_video_path = (output_dir / "videowise" / video_name).with_suffix(".mp4")
+                _make_video_with_ffmpeg(out_frames_dir_base_fake, out_video_path, fps=video_fps)
 
         # Stitched video: use stored stitched latents if available
         stitched_T3HW = None
-        if isinstance(data, dict) and "stitched_video" in data:
+        if ('framewise_stitched' in types) and "stitched_video" in data:
             stitched_latent = data["stitched_video"]
             stitched_TCHW = _to_TCHW(stitched_latent, latent_channels=vae.config.latent_channels)
             stitched_T3HW = _decode_frames_with_vae(vae, stitched_TCHW, batch_size=decode_batch_size)
+
             out_frames_dir_stitched_fake = output_dir / "framewise_stitched" / "fake" / video_name
             _save_frames(stitched_T3HW, out_frames_dir_stitched_fake)
 
             # Real counterpart for stitched: real frames with padding removed (not_pad_mask > 0.5)
-            try:
-                not_pad_mask_list_for_stitched = _coerce_mask_list(row.get('not_pad_mask', []), T_expected=frames_TCHW.shape[0])
-            except Exception:
-                not_pad_mask_list_for_stitched = [1.0] * frames_TCHW.shape[0]
-            keep = torch.tensor(not_pad_mask_list_for_stitched, dtype=torch.float32) > 0.5
+            keep = torch.tensor(not_pad_mask_list, dtype=torch.float32) > 0.5
             real_stitched = real_T3HW_resampled[keep]
             out_frames_dir_stitched_real = output_dir / "framewise_stitched" / "real" / real_video_name
             _save_frames(real_stitched, out_frames_dir_stitched_real)
 
-        # No-pad video: mask keep of not_pad_mask
-        not_pad_mask_list = _coerce_mask_list(row.get('not_pad_mask'), T_expected=frames_TCHW.shape[0])
-
-        no_pad_TCHW = _apply_mask_select_TCHW(frames_TCHW, not_pad_mask_list, invert=False)
-        decoded_no_pad = _decode_frames_with_vae(vae, no_pad_TCHW, batch_size=decode_batch_size) if no_pad_TCHW.shape[0] > 0 else no_pad_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
-        out_frames_dir_no_pad_fake = output_dir / "framewise_no_pad" / "fake" / video_name
-        _save_frames(decoded_no_pad, out_frames_dir_no_pad_fake)
-        # Real counterpart: resampled real then apply not_pad_mask keep
-        keep_np = torch.tensor(not_pad_mask_list, dtype=torch.float32) > 0.5
-        real_no_pad = real_T3HW_resampled[keep_np]
-        out_frames_dir_no_pad_real = output_dir / "framewise_no_pad" / "real" / real_video_name
-        _save_frames(real_no_pad, out_frames_dir_no_pad_real)
-
-        # Generated-only video: mask keep of NOT observed_mask
-        observed_mask_list = _coerce_mask_list(row.get('observed_mask'), T_expected=frames_TCHW.shape[0])
-        not_pad_mask_list = _coerce_mask_list(row.get('not_pad_mask'), T_expected=frames_TCHW.shape[0])
-        # Gets the generated frames but does not include padded frames i.e., (not observed) minus (padded)
-        generated_mask_list = [(1.- x)-(1. - y) for x, y in zip(observed_mask_list, not_pad_mask_list)]
-
-        generated_TCHW = _apply_mask_select_TCHW(frames_TCHW, generated_mask_list, invert=False)
-        decoded_generated = _decode_frames_with_vae(vae, generated_TCHW, batch_size=decode_batch_size) if generated_TCHW.shape[0] > 0 else generated_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
-        out_frames_dir_generated_fake = output_dir / "framewise_generated" / "fake" / video_name
-        _save_frames(decoded_generated, out_frames_dir_generated_fake)
-        # Real counterpart: resampled real then apply NOT observed_mask (hidden frames)
-        keep_gen = torch.tensor(generated_mask_list, dtype=torch.float32) >= 0.5
-        real_generated = real_T3HW_resampled[keep_gen]
-        out_frames_dir_generated_real = output_dir / "framewise_generated" / "real" / real_video_name
-        _save_frames(real_generated, out_frames_dir_generated_real)
-
-        # Videowise creation for all variants
-        if "videowise" in types:
-            video_fps = _get_fps(row['original_real_video_name'], fps, fps_map)
-            # base
-            out_video_path = (output_dir / "videowise" / video_name).with_suffix(".mp4")
-            _make_video_with_ffmpeg(out_frames_dir_base_fake, out_video_path, fps=video_fps)
-            # stitched
-            if stitched_T3HW is not None:
+            if "videowise_stitched" in types:
                 out_video_path_stitched = (output_dir / "videowise_stitched" / video_name).with_suffix(".mp4")
                 _make_video_with_ffmpeg(out_frames_dir_stitched_fake, out_video_path_stitched, fps=video_fps)
-            # no_pad
-            out_video_path_no_pad = (output_dir / "videowise_no_pad" / video_name).with_suffix(".mp4")
-            _make_video_with_ffmpeg(out_frames_dir_no_pad_fake, out_video_path_no_pad, fps=video_fps)
-            # generated
-            out_video_path_generated = (output_dir / "videowise_generated" / video_name).with_suffix(".mp4")
-            _make_video_with_ffmpeg(out_frames_dir_generated_fake, out_video_path_generated, fps=video_fps)
+
+        if "framewise_no_pad" in types:
+            # No-pad video: mask keep of not_pad_mask
+            decoded_no_pad = _apply_mask_select_TCHW(decoded_base, not_pad_mask_list, invert=False)
+
+            #no_pad_TCHW = _apply_mask_select_TCHW(frames_TCHW, not_pad_mask_list, invert=False)
+            #decoded_no_pad = _decode_frames_with_vae(vae, no_pad_TCHW, batch_size=decode_batch_size) if no_pad_TCHW.shape[0] > 0 else no_pad_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
+
+            out_frames_dir_no_pad_fake = output_dir / "framewise_no_pad" / "fake" / video_name
+            _save_frames(decoded_no_pad, out_frames_dir_no_pad_fake)
+            # Real counterpart: resampled real then apply not_pad_mask keep
+            keep_np = torch.tensor(not_pad_mask_list, dtype=torch.float32) > 0.5
+            real_no_pad = real_T3HW_resampled[keep_np]
+            out_frames_dir_no_pad_real = output_dir / "framewise_no_pad" / "real" / real_video_name
+            _save_frames(real_no_pad, out_frames_dir_no_pad_real)
+
+            if "videowise_no_pad" in types:
+                out_video_path_no_pad = (output_dir / "videowise_no_pad" / video_name).with_suffix(".mp4")
+                _make_video_with_ffmpeg(out_frames_dir_no_pad_fake, out_video_path_no_pad, fps=video_fps)
+
+        if "framewise_generated" in types:
+            # Generated-only video: mask keep of NOT observed_mask
+            
+            # Gets the generated frames but does not include padded frames i.e., (not observed) minus (padded)
+            generated_mask_list = [(1.- x)-(1. - y) for x, y in zip(observed_mask_list, not_pad_mask_list)]
+            decoded_generated = _apply_mask_select_TCHW(decoded_base, generated_mask_list, invert=False)
+
+            #generated_TCHW = _apply_mask_select_TCHW(frames_TCHW, generated_mask_list, invert=False)
+            #decoded_generated = _decode_frames_with_vae(vae, generated_TCHW, batch_size=decode_batch_size) if generated_TCHW.shape[0] > 0 else generated_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
+            
+            out_frames_dir_generated_fake = output_dir / "framewise_generated" / "fake" / video_name
+            _save_frames(decoded_generated, out_frames_dir_generated_fake)
+            # Real counterpart: resampled real then apply NOT observed_mask (hidden frames)
+            keep_gen = torch.tensor(generated_mask_list, dtype=torch.float32) >= 0.5
+            real_generated = real_T3HW_resampled[keep_gen]
+            out_frames_dir_generated_real = output_dir / "framewise_generated" / "real" / real_video_name
+            _save_frames(real_generated, out_frames_dir_generated_real)
+
+            if "videowise_generated" in types:
+                # generated
+                out_video_path_generated = (output_dir / "videowise_generated" / video_name).with_suffix(".mp4")
+                _make_video_with_ffmpeg(out_frames_dir_generated_fake, out_video_path_generated, fps=video_fps)
 
     df.to_csv(output_dir / 'metadata.csv', index=False)
     print(f"[done] Outputs saved under: {output_dir}")

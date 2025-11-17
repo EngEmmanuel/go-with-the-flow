@@ -10,7 +10,7 @@ import torch
 import torch._dynamo
 import torch.nn as nn
 import torch.nn.functional as F
-import xformers
+#import xformers
 from diffusers.configuration_utils import ConfigMixin, register_to_config
 from diffusers.loaders import UNet2DConditionLoadersMixin
 from diffusers.models.attention import BasicTransformerBlock
