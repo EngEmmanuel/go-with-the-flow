@@ -218,8 +218,7 @@ def main(cfg: DictConfig):
                 cfg=cfg,
                 sample_dir=sample_dir,
                 sample_dl=sample_dl,
-                checkpoint_dir=ckpt_dir,
-                debug=True
+                checkpoint_dir=ckpt_dir
             )
         )
 
