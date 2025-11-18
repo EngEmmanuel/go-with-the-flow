@@ -18,7 +18,15 @@ latents_dirs:
   ef_histogram_matching: ${run_dir}/evaluation/latents/${time_and_date}/ef_histogram_matching #null
 
 repo_id: HReynaud/EchoFlow
-types: [videowise]  # output types e.g., 'videowise' or 'framewise' or both
+types:
+  #- framewise
+  #- videowise
+  - framewise_no_pad
+  - videowise_no_pad
+  #- framewise_generated
+  #- videowise_generated
+  #- framewise_stitched
+  #- videowise_stitched
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
 queries:
   ef_histogram_matching:
