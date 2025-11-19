@@ -54,6 +54,9 @@ def main(eval_cfg: DictConfig):
         
         # Load model from run directory
         run_cfg = _get_run_config(run_dir)
+        # Make path agnostic
+        run_cfg.paths = eval_cfg.paths
+        # prepare dataloaders
         all_dataloaders = generate_dls_for_evaluation_scheme(run_cfg, eval_cfg)
 
         dummy_data = next(iter(all_dataloaders.values()))[0].dataset[0]

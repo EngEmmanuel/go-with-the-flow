@@ -18,6 +18,8 @@ from dataset import default_eval_collate
 from utils.ema import EMAWeightAveraging
 from utils.train import load_model, load_flow
 
+from evaluation.mid_train_evaluation import EvaluateTrainProcess
+
 def cycle(dl):
     while True:
         for batch in dl:
@@ -218,8 +220,7 @@ def main(cfg: DictConfig):
                 cfg=cfg,
                 sample_dir=sample_dir,
                 sample_dl=sample_dl,
-                checkpoint_dir=ckpt_dir,
-                debug=True
+                checkpoint_dir=ckpt_dir
             )
         )
 
@@ -228,8 +229,12 @@ def main(cfg: DictConfig):
 
     logger = None
     if cfg.get('wandb'):
+        tags = cfg.wandb.get('tags', {})
+        tags = list(tags.values())
+
         logger = WandbLogger(
-            **cfg.wandb,
+            **cfg.wandb.init_kwargs,
+            tags=tags,
             save_dir=str(output_dir),
             config=config
         )
@@ -245,6 +250,29 @@ def main(cfg: DictConfig):
     utc_now = datetime.now(timezone.utc)
     print(utc_now.strftime("%A, %d %B %Y, %H:%M:%S %Z"))
     trainer.fit(model, train_dl, val_dl)
+
+    # Evaluate mid-training checkpoints if specified
+    if cfg.get('eval_ckpt') is not None:
+        eval_ckpt_cfg = cfg.eval_ckpt
+        evaluator = EvaluateTrainProcess(
+            eval_ckpt_cfg, 
+            run_dir=output_dir, 
+            output_dir=output_dir / 'mid_train_evaluation'
+        )
+        df = evaluator.process_checkpoints(delete_latents_after=True)
+        print("Final Results DataFrame\n", df)
+
+        # Log to wandb
+        try:
+            evaluator.log_results_to_wandb()
+        except Exception as e:
+            print(f"[WARN] Failed to log results to wandb: {e}")
+        
+        # Plot metrics
+        try:
+            evaluator.plot_metrics()
+        except Exception as e:
+            print(f"[WARN] Failed to plot metrics: {e}")
 
 if __name__ == '__main__':
     device = select_device()

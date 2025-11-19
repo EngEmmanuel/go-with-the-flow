@@ -5,3 +5,7 @@ trainer:
 dataset:
   masking_distribution: geometric
   cond_pad_mask: true
+
+wandb:
+  tags:
+    run_tag: run07
