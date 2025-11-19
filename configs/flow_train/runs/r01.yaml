@@ -1,5 +1,4 @@
 # @package _global_
-
 trainer:
   loss_mask: null
 
@@ -7,3 +6,6 @@ dataset:
   masking_distribution: 1-frame
   cond_pad_mask: false
 
+wandb:
+  tags:
+    run_tag: run01

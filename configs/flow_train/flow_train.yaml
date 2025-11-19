@@ -3,6 +3,7 @@ defaults:
   - model: unet
   - flow: mean
   - paths: ibme # Simply override in cli call
+  - eval_ckpt: eval
 
 dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
@@ -59,9 +60,10 @@ ckpt:
 
   
 wandb:
-  project: go-with-the-flow
-  entity: engemmanuel
-  group: ${flow.type}
+  init_kwargs:
+    project: go-with-the-flow
+    entity: engemmanuel
+    group: ${flow.type}
   #mode: offline
 
 hydra:
