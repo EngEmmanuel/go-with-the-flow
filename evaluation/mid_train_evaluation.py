@@ -21,13 +21,17 @@ from evaluation.latents_to_videos import convert_latents_directory
 from evaluation.metrics import compute_metrics_for_datasets, run_stylegan_metrics
 
 class EvaluateTrainProcess():
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, run_dir=None, output_dir=None):
         self.cfg = cfg
         self.device = select_device()
 
-        self.ckpt_dir = Path(self.cfg.run_dir) / "checkpoints"
-        self.latent_dir = Path(self.cfg.run_dir) / "sample_videos"
-        self.wandb_dir = Path(self.cfg.run_dir) / "wandb"
+        # Potentially override dirs
+        self.run_dir = Path(run_dir) if run_dir is not None else Path(self.cfg.run_dir)
+        self.output_dir = Path(output_dir) if output_dir is not None else Path(self.cfg.output_dir)
+
+        self.ckpt_dir = self.run_dir / "checkpoints"
+        self.latent_dir = self.run_dir / "sample_videos"
+        self.wandb_dir = self.run_dir / "wandb"
         if not self.wandb_dir.exists():
             self.wandb_dir = None
 
@@ -70,9 +74,8 @@ class EvaluateTrainProcess():
     def _get_wandb_info(self):
         'Gets wandb project, entity, and run id from the run directory'
 
-        run_cfg_dir = Path(self.cfg.run_dir) / '.hydra' / 'config.yaml'
-        with open(run_cfg_dir, 'r') as f:
-            run_cfg = yaml.safe_load(f)
+        run_cfg_dir = Path(self.run_dir) / '.hydra' / 'config.yaml'
+        run_cfg = OmegaConf.load(run_cfg_dir)
         project = run_cfg.wandb.project
         entity = run_cfg.wandb.entity
 
@@ -84,9 +87,16 @@ class EvaluateTrainProcess():
             print("Multiple wandb run directories found; using the first one.")
             print([x.name for x in match])
         
-        run_id = match[0].name.split("run-")[-1]
+        run_id = match[0].name.split("-")[-1]
         return project, entity, run_id
 
+    def load_results_df(self) -> pd.DataFrame:
+        'Loads a results dataframe from a CSV file'
+        path = self.results_dir / "all_checkpoints_results.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"Results file not found: {path}")
+        df = pd.read_csv(path)
+        return df
 
     def _delete_files(self, paths: list[Path]):
         'Deletes specified files to save space'
@@ -109,10 +119,10 @@ class EvaluateTrainProcess():
             decoded_videos_dir = convert_latents_directory(
                 real_data_path = Path(self.cfg.real_data_path),
                 latents_dir = latents_dir,
-                run_dir = self.cfg.run_dir,
+                run_dir = self.run_dir,
                 repo_id = self.cfg.repo_id,
                 query = {'name': name, 'pattern': query},
-                output_dir = Path(self.cfg.output_dir) / latents_dir.name / name,
+                output_dir = self.output_dir / latents_dir.name / name,
                 types = self.cfg.types,
                 fps_metadata_csv = self.cfg.fps_metadata_csv,
                 decode_batch_size = self.cfg.get('decode_batch_size', 32),
@@ -271,12 +281,14 @@ class EvaluateTrainProcess():
             else:
                 ax.set_visible(False)
 
-        if save_path:
-            fig.savefig(save_path, dpi=800, bbox_inches='tight')
-        plt.show()
+        if not save_path:
+            save_path = self.results_dir / "metrics_plot.png"
+
+        fig.savefig(save_path, dpi=800, bbox_inches='tight')
+
         return fig, axes
     
-    def log_results_to_wandb(self):
+    def log_results_to_wandb(self, results_df=None):
         """
         Log self.results_df to the W&B run:
         - Upload the results as a W&B Table.
@@ -284,10 +296,13 @@ class EvaluateTrainProcess():
           with separate series per task. Supports 'last' checkpoint resolution like plot_metrics.
         """
 
-        if not hasattr(self, 'results_df') or self.results_df is None or self.results_df.empty:
-            print("No results_df available; run process_checkpoints() first.")
-            return
-
+        if results_df is None:
+            if not hasattr(self, 'results_df') or self.results_df is None or self.results_df.empty:
+                print("No results_df available; run process_checkpoints() first.")
+                return
+            results_df = self.results_df.copy()
+        else:
+            df = results_df.copy()
         # Attach to the same W&B run
         project, entity, run_id = self._get_wandb_info()
         init_kwargs = dict(project=project, entity=entity, id=run_id, resume='allow')
@@ -296,7 +311,6 @@ class EvaluateTrainProcess():
         run = wandb.init(**init_kwargs)
 
         # Prepare dataframe: add epoch/step and resolve 'last'
-        df = self.results_df.copy()
         df[['epoch','step']] = pd.DataFrame(
             df['checkpoint'].apply(extract_epoch_step_from_checkpoint_str).tolist(), index=df.index
         )
@@ -335,19 +349,23 @@ class EvaluateTrainProcess():
                     xs=xs_list,
                     ys=ys_list,
                     keys=keys,
-                    title=f"{metric} vs step (by task)",
+                    title=f"{metric}",
                     xname="step"
                 )
-                wandb.log({f"mid_train_evaluation/metrics/{metric}_vs_step": chart})
+                wandb.log({f"mid_train_evaluation/metrics/{metric}": chart})
 
         run.finish()
 
 @hydra.main(version_base=None, config_path='configs', config_name='evaluate_ckpts')
 def main(eval_ckpt_cfg: DictConfig):
     evaluator = EvaluateTrainProcess(eval_ckpt_cfg)
-    df = evaluator.process_checkpoints(delete_latents_after=True)
-    print("Final Results DataFrame:\n", df)
-    evaluator.plot_metrics(save_path=evaluator.results_dir / "metrics_plot.png")
+    df = evaluator.load_results_df()
+    evaluator.log_results_to_wandb(df)
+
+    if False:
+        df = evaluator.process_checkpoints(delete_latents_after=True)
+        print("Final Results DataFrame:\n", df)
+        evaluator.plot_metrics(save_path=evaluator.results_dir / "metrics_plot.png")
 
 
 if __name__ == "__main__":
