@@ -335,7 +335,7 @@ class EvaluateTrainProcess():
                     xs=xs_list,
                     ys=ys_list,
                     keys=keys,
-                    title=f"{metric} vs step (by task)",
+                    title=f"{metric}",
                     xname="step"
                 )
                 wandb.log({f"mid_train_evaluation/metrics/{metric}_vs_step": chart})
@@ -347,6 +347,11 @@ def main(eval_ckpt_cfg: DictConfig):
     evaluator = EvaluateTrainProcess(eval_ckpt_cfg)
     df = evaluator.process_checkpoints(delete_latents_after=True)
     print("Final Results DataFrame:\n", df)
+    try:
+        evaluator.log_results_to_wandb()
+    except Exception as e:
+        print("W&B logging failed:", e)
+        evaluator.log_results_to_wandb(df)
     evaluator.plot_metrics(save_path=evaluator.results_dir / "metrics_plot.png")
 
 

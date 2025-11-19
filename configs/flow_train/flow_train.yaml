@@ -1,6 +1,6 @@
 defaults:
   - _self_ # First takes priority so any properties redefined here take precedence
-  - model: unet
+  - model: unet_test #unet
   - flow: mean
   - paths: ibme # Simply override in cli call
 
@@ -9,7 +9,7 @@ dataset:
   normalise_latents: true
   latent_scaling_path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}/CAMUS_Scaling_${vae.resolution}.pt
   max_frames: 32
-  batch_size: 5
+  batch_size: 2 #5
   cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
   masking_distribution: uniform  # Distribution to use for random masking; 'uniform' or 'geometric'
 
@@ -25,17 +25,17 @@ vae:
 trainer:
   lr: 1e-4
   lr_scheduler: cosineannealing
-  warmup_epochs: 10
+  warmup_epochs: 5 #10
   loss_mask: pad
   uncond_prob: 0.0
   kwargs:
-    max_epochs: 1000
+    max_epochs: 10 #1000
     precision: 16
     accelerator: auto
     val_check_interval: 0.1
     accumulate_grad_batches: 3
     #profiler: simple
-    #overfit_batches: 0.1 #debug
+    overfit_batches: 0.05 #debug
 
 #ema:
 #  kwargs:
@@ -45,7 +45,7 @@ trainer:
 #    use_buffers: true
 
 sample:
-  every_n_epochs: 50
+  every_n_epochs: 2
   model_sample_kwargs: ${flow.sample_kwargs}
 
 
@@ -58,11 +58,11 @@ ckpt:
     save_last: True
 
   
-wandb:
-  project: go-with-the-flow
-  entity: engemmanuel
-  group: ${flow.type}
-  #mode: offline
+# wandb:
+#   project: go-with-the-flow
+#   entity: engemmanuel
+#   group: ${flow.type}
+#   #mode: offline
 
 hydra:
   run:
