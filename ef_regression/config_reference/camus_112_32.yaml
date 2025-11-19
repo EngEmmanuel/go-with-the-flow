@@ -8,18 +8,18 @@ dataset:
   deactivate_cache: True
   image_size: 64
   channels: 3
-  target_frames: 16
+  target_frames: 32
   preload_data: False
   data_mean: 0.187211
   data_std: 0.220990
-  temporal_upsample: False  # Set True to trilinear-upsample sequences shorter than target_frames along time only
+  temporal_upsample: True  # Set True to trilinear-upsample sequences shorter than target_frames along time only
   ef_column: EF_Area  # Column name for EF values
 
 model:
   pretrained: False
 
 dataloader:
-  batch_size: 7
+  batch_size: 64
   num_workers: 32
 
 trainer:
@@ -33,9 +33,9 @@ trainer:
   accumulate_grad_batches: 2
 
 wandb:
-  project: "ef_regression"
-  entity: "engemmanuel"
+  project: ef_regression
+  entity: engemmanuel
 
 checkpoint:
-  path: ${project_path}/outputs/ef_regression
+  path: /data/spet4299/flow-matching/go-with-the-flow/outputs/ef_regression
   
