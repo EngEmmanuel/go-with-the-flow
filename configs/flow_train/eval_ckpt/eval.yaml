@@ -1,15 +1,10 @@
-defaults:
-  - _self_ # First takes priority so any properties redefined here take precedence
-  - paths: ibme_cluster # Simply override in cli call
-
-
 real_data_path: ${paths.data_path}/CAMUS_Processed_Frames #_Temp_2 #Frames
 repo_id: HReynaud/EchoFlow
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
 
 
-run_dir: ${paths.train_output_path}/tests/2025-11-18/18-54-47
-output_dir: ${run_dir}/mid_train_evaluation
+run_dir: null # This will be defined in trainer.py
+output_dir: null # This will be defined in trainer.py
 
 
 types:

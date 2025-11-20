@@ -1,5 +1,8 @@
 
 import re
+import yaml
+import wandb
+import torch
 import hydra
 
 import pandas as pd
@@ -13,16 +16,26 @@ import sys
 sys.path.append(str(Path(__file__).resolve().parent.parent))
 
 from utils import select_device
+from utils.evaluation import *
 from evaluation.latents_to_videos import convert_latents_directory
 from evaluation.metrics import compute_metrics_for_datasets, run_stylegan_metrics
 
 class EvaluateTrainProcess():
-    def __init__(self, cfg: DictConfig):
+    def __init__(self, cfg: DictConfig, run_dir=None, output_dir=None):
         self.cfg = cfg
         self.device = select_device()
 
-        self.ckpt_dir = Path(self.cfg.run_dir) / "checkpoints"
-        self.latent_dir = Path(self.cfg.run_dir) / "sample_videos"
+        # Potentially override dirs
+        self.run_dir = Path(run_dir) if run_dir is not None else Path(self.cfg.run_dir)
+        self.output_dir = Path(output_dir) if output_dir is not None else Path(self.cfg.output_dir)
+
+        self.ckpt_dir = self.run_dir / "checkpoints"
+        self.latent_dir = self.run_dir / "sample_videos"
+        self.wandb_dir = self.run_dir / "wandb"
+        if not self.wandb_dir.exists():
+            self.wandb_dir = None
+
+
         self._get_latents_and_checkpoints()
 
         self.query = {
@@ -58,6 +71,33 @@ class EvaluateTrainProcess():
         'Converts a latent directory name to its corresponding latent directory path'
         return self.latent_dir / name
 
+    def _get_wandb_info(self):
+        'Gets wandb project, entity, and run id from the run directory'
+
+        run_cfg_dir = Path(self.run_dir) / '.hydra' / 'config.yaml'
+        run_cfg = OmegaConf.load(run_cfg_dir)
+        project = run_cfg.wandb.project
+        entity = run_cfg.wandb.entity
+
+        # Get run id
+        match = [x for x in self.wandb_dir.glob("run-*")]
+        if not match:
+            raise ValueError("No wandb run directory found.")
+        if len(match) > 1:
+            print("Multiple wandb run directories found; using the first one.")
+            print([x.name for x in match])
+        
+        run_id = match[0].name.split("-")[-1]
+        return project, entity, run_id
+
+    def load_results_df(self) -> pd.DataFrame:
+        'Loads a results dataframe from a CSV file'
+        path = self.results_dir / "all_checkpoints_results.csv"
+        if not path.exists():
+            raise FileNotFoundError(f"Results file not found: {path}")
+        df = pd.read_csv(path)
+        return df
+
     def _delete_files(self, paths: list[Path]):
         'Deletes specified files to save space'
         for p in paths:
@@ -79,10 +119,10 @@ class EvaluateTrainProcess():
             decoded_videos_dir = convert_latents_directory(
                 real_data_path = Path(self.cfg.real_data_path),
                 latents_dir = latents_dir,
-                run_dir = self.cfg.run_dir,
+                run_dir = self.run_dir,
                 repo_id = self.cfg.repo_id,
                 query = {'name': name, 'pattern': query},
-                output_dir = Path(self.cfg.output_dir) / latents_dir.name / name,
+                output_dir = self.output_dir / latents_dir.name / name,
                 types = self.cfg.types,
                 fps_metadata_csv = self.cfg.fps_metadata_csv,
                 decode_batch_size = self.cfg.get('decode_batch_size', 32),
@@ -202,43 +242,16 @@ class EvaluateTrainProcess():
         if df is None:
             df = self.results_df
 
-        def extract_nums(s):
-            if pd.isna(s):
-                return float('nan'), float('nan')
-            me = re.search(r'epoch=([0-9]+(?:\.[0-9]+)?)', s)
-            ms = re.search(r'step=([0-9]+(?:\.[0-9]+)?)', s)
-            return (float(me.group(1)) if me else float('nan'),
-                    float(ms.group(1)) if ms else float('nan'))
-
         df = df.copy()
-        df[['epoch','step']] = pd.DataFrame(df['checkpoint'].apply(extract_nums).tolist(), index=df.index)
+        df[['epoch','step']] = pd.DataFrame(
+            df['checkpoint'].apply(extract_epoch_step_from_checkpoint_str).tolist(), index=df.index
+            )
 
         # support 'last' checkpoint: try to load real epoch/global_step from the saved checkpoint
-        last_mask = df['checkpoint'].astype(str).str.contains(r'\blast\b', na=False)
-        if last_mask.any():
-            # fallback: push 'last' after the max numeric epoch/step
-            max_epoch = df['epoch'].dropna().max()
-            max_step = df['step'].dropna().max()
-            if pd.isna(max_epoch):
-                max_epoch = 0.0
-            if pd.isna(max_step):
-                max_step = 0.0
-
-            try:
-                import torch
-                ckpt = torch.load(self._name_to_ckpt_path('last'))
-                # common keys: 'epoch' and 'global_step'
-                ckpt_epoch = ckpt.get('epoch', ckpt.get('epoch_idx', None))
-                ckpt_step = ckpt.get('global_step', ckpt.get('step', None))
-                if ckpt_epoch is None or ckpt_step is None:
-                    # If keys missing, treat as failure to use fallback below
-                    raise KeyError("checkpoint missing epoch/global_step")
-                df.loc[last_mask, 'epoch'] = float(ckpt_epoch)
-                df.loc[last_mask, 'step'] = float(ckpt_step)
-            except Exception:
-                # loader failed or keys missing — place 'last' after the max numeric epoch/step
-                df.loc[last_mask, 'epoch'] = max_epoch + 1.0
-                df.loc[last_mask, 'step'] = max_step + 1.0
+        df = resolve_last_checkpoint_positions(
+            df,
+            load_last_ckpt_fn = lambda: torch.load(self._name_to_ckpt_path('last'))
+        )
 
         metric_cols = [c for c in df.columns if c not in ('checkpoint','task','type','epoch','step')]
         metric_cols = [m for m in metric_cols if not df[m].dropna().empty]
@@ -268,17 +281,88 @@ class EvaluateTrainProcess():
             else:
                 ax.set_visible(False)
 
-        if save_path:
-            fig.savefig(save_path, dpi=800, bbox_inches='tight')
-        plt.show()
+        if not save_path:
+            save_path = self.results_dir / "metrics_plot.png"
+
+        fig.savefig(save_path, dpi=800, bbox_inches='tight')
+
         return fig, axes
     
+    def log_results_to_wandb(self, results_df=None):
+        """
+        Log self.results_df to the W&B run:
+        - Upload the results as a W&B Table.
+        - For each metric column, log a W&B-generated line plot with x=step and y=<metric>,
+          with separate series per task. Supports 'last' checkpoint resolution like plot_metrics.
+        """
+
+        if results_df is None:
+            if not hasattr(self, 'results_df') or self.results_df is None or self.results_df.empty:
+                print("No results_df available; run process_checkpoints() first.")
+                return
+            results_df = self.results_df.copy()
+        else:
+            df = results_df.copy()
+        # Attach to the same W&B run
+        project, entity, run_id = self._get_wandb_info()
+        init_kwargs = dict(project=project, entity=entity, id=run_id, resume='allow')
+        if self.wandb_dir:
+            init_kwargs['dir'] = str(self.wandb_dir)
+        run = wandb.init(**init_kwargs)
+
+        # Prepare dataframe: add epoch/step and resolve 'last'
+        df[['epoch','step']] = pd.DataFrame(
+            df['checkpoint'].apply(extract_epoch_step_from_checkpoint_str).tolist(), index=df.index
+        )
+        df = resolve_last_checkpoint_positions(
+            df,
+            load_last_ckpt_fn=lambda: torch.load(self._name_to_ckpt_path('last'))
+        )
+        df['step'] = pd.to_numeric(df['step'], errors='coerce')
+
+        # Log the raw results as a W&B table
+        table = wandb.Table(dataframe=df)
+        wandb.log({"mid_train_evaluation/results_table": table})
+
+        # Identify metric columns (exclude non-metrics)
+        exclude = {'checkpoint', 'task', 'type', 'epoch', 'step'}
+        metric_cols = [c for c in df.columns if c not in exclude and df[c].notna().any()]
+
+        # Build W&B-generated line plots per metric, series grouped by task, x=step
+        tasks = [t for t in df['task'].dropna().unique()]
+        for metric in metric_cols:
+            xs_list, ys_list, keys = [], [], []
+            for task in tasks:
+                sub = df[df['task'] == task][['step', metric]].dropna(subset=['step', metric]).copy()
+                if sub.empty:
+                    continue
+                # Aggregate to one value per step per task (average across 'type' etc.)
+                agg = sub.groupby('step', as_index=True)[metric].mean().sort_index()
+                if agg.empty:
+                    continue
+                xs_list.append(agg.index.astype(int).tolist())
+                ys_list.append(agg.values.astype(float).tolist())
+                keys.append(str(task))
+
+            if xs_list:
+                chart = wandb.plot.line_series(
+                    xs=xs_list,
+                    ys=ys_list,
+                    keys=keys,
+                    title=f"{metric}",
+                    xname="step"
+                )
+                wandb.log({f"mid_train_evaluation/metrics/{metric}": chart})
+
+        run.finish()
 
 @hydra.main(version_base=None, config_path='configs', config_name='evaluate_ckpts')
 def main(eval_ckpt_cfg: DictConfig):
     evaluator = EvaluateTrainProcess(eval_ckpt_cfg)
     df = evaluator.process_checkpoints(delete_latents_after=True)
     print("Final Results DataFrame:\n", df)
+
+    evaluator.log_results_to_wandb()
     evaluator.plot_metrics(save_path=evaluator.results_dir / "metrics_plot.png")
 
 
