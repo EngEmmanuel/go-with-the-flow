@@ -84,7 +84,7 @@ def _lpips_vgg(metric_net, img1: torch.Tensor, img2: torch.Tensor) -> float:
     return float(d.squeeze().detach().cpu().item())
 
 
-def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus: int) -> Dict[str, Any]:
+def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus: int, stylegan_dir=None) -> Dict[str, Any]:
     cmd = [
         "python", "src/scripts/calc_metrics_for_dataset.py",
         "--real_data_path", str(inference_root_sub / "real"),
@@ -95,8 +95,9 @@ def run_stylegan_metrics(inference_root_sub: Path, stylegan_metrics: str, n_gpus
         "--use_cache", '0'
     ]
 
+    stylegan_dir = "stylegan-v" if stylegan_dir is None else stylegan_dir
     try:
-        cp = subprocess.run(cmd, cwd="stylegan-v", text=True, capture_output=True, check=True)
+        cp = subprocess.run(cmd, cwd=stylegan_dir, text=True, capture_output=True, check=True)
     except subprocess.CalledProcessError as e:
         # Print what you would have seen, then re-raise
         if e.stdout: print(e.stdout, end="")

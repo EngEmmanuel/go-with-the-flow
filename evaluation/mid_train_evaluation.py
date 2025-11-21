@@ -300,7 +300,7 @@ class EvaluateTrainProcess():
             if not hasattr(self, 'results_df') or self.results_df is None or self.results_df.empty:
                 print("No results_df available; run process_checkpoints() first.")
                 return
-            results_df = self.results_df.copy()
+            df = self.results_df.copy()
         else:
             df = results_df.copy()
         # Attach to the same W&B run
@@ -356,14 +356,37 @@ class EvaluateTrainProcess():
 
         run.finish()
 
+def _log_df_to_wandb(eval_ckpt_cfg):
+    df_path = Path(eval_ckpt_cfg.run_dir) / "sample_videos" / "mid_train_evaluation_results" / "all_checkpoints_results.csv"
+    if not df_path.exists():
+        raise FileNotFoundError(f"Results file not found: {df_path}")
+    
+    df = pd.read_csv(df_path)
+    EvaluateTrainProcess(eval_ckpt_cfg).log_results_to_wandb(df)
+
+
+
 @hydra.main(version_base=None, config_path='configs', config_name='evaluate_ckpts')
 def main(eval_ckpt_cfg: DictConfig):
-    evaluator = EvaluateTrainProcess(eval_ckpt_cfg)
-    df = evaluator.process_checkpoints(delete_latents_after=True)
-    print("Final Results DataFrame:\n", df)
+    _main = False
+    if _main:
+        evaluator = EvaluateTrainProcess(eval_ckpt_cfg)
+        df = evaluator.process_checkpoints(delete_latents_after=True)
+        print("Final Results DataFrame:\n", df)
 
-    evaluator.log_results_to_wandb()
-    evaluator.plot_metrics(save_path=evaluator.results_dir / "metrics_plot.png")
+        # Log to wandb
+        try:
+            evaluator.log_results_to_wandb()
+        except Exception as e:
+            print(f"[WARN] Failed to log results to wandb: {e}")
+        
+        # Plot metrics
+        try:
+            evaluator.plot_metrics()
+        except Exception as e:
+            print(f"[WARN] Failed to plot metrics: {e}")
+    else:
+        _log_df_to_wandb(eval_ckpt_cfg)
 
 
 if __name__ == "__main__":
