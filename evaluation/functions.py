@@ -55,7 +55,10 @@ def load_model_from_run(run_dir: str | Path, dummy_data: dict, ckpt_name: Option
 		cfg: The OmegaConf configuration loaded from the run.
 		ckpt_path: The resolved checkpoint path used.
 	"""
-	cfg = _get_run_config(Path(run_dir))
+	if isinstance(run_dir, str):
+		run_dir = Path(run_dir)
+		
+	cfg = _get_run_config(run_dir)
 	ckpt_dir = run_dir / "checkpoints"
 	if not ckpt_dir.exists():
 		raise FileNotFoundError(f"Checkpoints directory not found at {ckpt_dir}")
