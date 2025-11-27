@@ -33,7 +33,6 @@ trainer:
     max_epochs: 1000
     precision: 16
     accelerator: auto
-    val_check_interval: 0.1
     accumulate_grad_batches: 3
     #profiler: simple
     #overfit_batches: 0.05 #debug
