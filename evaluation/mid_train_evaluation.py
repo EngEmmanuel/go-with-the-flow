@@ -76,8 +76,8 @@ class EvaluateTrainProcess():
 
         run_cfg_dir = Path(self.run_dir) / '.hydra' / 'config.yaml'
         run_cfg = OmegaConf.load(run_cfg_dir)
-        project = run_cfg.wandb.project
-        entity = run_cfg.wandb.entity
+        project = run_cfg.wandb.init_kwargs.project
+        entity = run_cfg.wandb.init_kwargs.entity
 
         # Get run id
         match = [x for x in self.wandb_dir.glob("run-*")]
