@@ -8,7 +8,7 @@ repo_id: HReynaud/EchoFlow
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
 
 
-run_dir: ${paths.train_output_path}/tests/2025-11-18/18-54-47
+run_dir: ${paths.train_output_path}/tests/2025-11-17/20-25-08
 output_dir: ${run_dir}/mid_train_evaluation
 
 
@@ -27,3 +27,7 @@ metrics:
   fake_glob: ['*']            # glob pattern to match generated videos
   pairwise_metrics: [ssim, psnr, lpips_vgg, mae, mse]  # metrics to compute
   stylegan_metrics: [fid50k_full, fvd2048_10f]
+
+hydra:
+  run:
+    dir: ${paths.train_output_path}/mid_train_eval_outputs/${now:%Y-%m-%d}/${now:%H-%M-%S}

@@ -259,7 +259,7 @@ def convert_latents_directory(
 
 
     # Process each row
-    for _, row in tqdm(df.iterrows(), total=len(df), desc="Converting latents to videos"):
+    for _, row in tqdm(df.iterrows(), total=len(df), unit=" latents", desc="Converting latents to videos"):
         video_name = str(row["video_name"]) if "video_name" in row else None
         if not video_name:
             continue
