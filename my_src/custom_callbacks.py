@@ -9,65 +9,68 @@ from evaluation.ef_evaluation_schemes import UnscaleLatents
 
 
 class SampleAndCheckpointCallback(Callback):
-    '''
-    Callback to sample latents from the model and save checkpoints at specified 
-    intervals during training. Checkpoints saved in this callback contain only 
-    model weights.
-    '''
-    def __init__(self, cfg, sample_dir: Path, sample_dl, checkpoint_dir: Path, debug=False):
-        super().__init__()
-        self.cfg = cfg
-        self.sample_dir = sample_dir
-        self.sample_dl = sample_dl
-        self.checkpoint_dir = checkpoint_dir
-        self._last_sample_epoch = 0  
-        self.debug = debug
+	'''
+	Callback to sample latents from the model and save checkpoints at specified 
+	intervals during training. Checkpoints saved in this callback contain only 
+	model weights.
+	'''
+	def __init__(self, cfg, sample_dir: Path, sample_dl, checkpoint_dir: Path, debug=False):
+		super().__init__()
+		self.cfg = cfg
+		self.sample_dir = sample_dir
+		self.sample_dl = sample_dl
+		self.checkpoint_dir = checkpoint_dir
+		self._last_sample_epoch = 0  
+		self.debug = debug
 		
-        # Make sure dirs exist
-        self.sample_dir.mkdir(parents=True, exist_ok=True)
-        self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+		# Make sure dirs exist
+		self.sample_dir.mkdir(parents=True, exist_ok=True)
+		self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
 
-    def on_validation_epoch_end(self, trainer, pl_module):
-        self._sample_step(trainer, pl_module)
-        
-    def on_fit_end(self, trainer, pl_module):
-        self._sample_step(trainer, pl_module, last=True)
+	def on_validation_epoch_end(self, trainer, pl_module):
+		self._sample_step(trainer, pl_module)
+		
+	def on_fit_end(self, trainer, pl_module):
+		self._sample_step(trainer, pl_module, last=True)
 
-    def _sample_step(self, trainer, pl_module, last=False):
-        if self.sample_dir is None or trainer.sanity_checking:
-            return
+	def _sample_step(self, trainer, pl_module, last=False):
+		if self.sample_dir is None or trainer.sanity_checking:
+			return
 
-        epoch = trainer.current_epoch
-        is_sample_step = (
-            epoch % self.cfg.sample.every_n_epochs == 0
-            and epoch != self._last_sample_epoch
-        )
+		epoch = trainer.current_epoch
+		is_sample_step = (
+			epoch % self.cfg.sample.every_n_epochs == 0
+			and epoch != self._last_sample_epoch
+		)
+		if last:
+			is_sample_step = True
+			print('Sampling last ckpt latents')
 
-        if is_sample_step:
-            if trainer.is_global_zero:
-                out_name = 'last' if last else None
-                sample_latents_from_model(
-                    model=pl_module.model,
-                    dl_list=[self.sample_dl],
-                    run_cfg=self.cfg,
-                    epoch=epoch,
-                    step=trainer.global_step,
-                    device=pl_module.device,
-                    samples_dir=self.sample_dir,
-                    out_name=out_name
-                )
+		if is_sample_step:
+			if trainer.is_global_zero:
+				out_name = 'last' if last else None
+				sample_latents_from_model(
+					model=pl_module.model,
+					dl_list=[self.sample_dl],
+					run_cfg=self.cfg,
+					epoch=epoch,
+					step=trainer.global_step,
+					device=pl_module.device,
+					samples_dir=self.sample_dir,
+					out_name=out_name
+				)
 
-                self._last_sample_epoch = epoch
+				self._last_sample_epoch = epoch
 
-            trainer.strategy.barrier()  # Ensure all processes sync here
+			trainer.strategy.barrier()  # Ensure all processes sync here
 
-            # Save checkpoint right after sampling
-            if not last:
-                ckpt_name = f"sample-epoch={epoch}-step={trainer.global_step}.ckpt"
-                trainer.save_checkpoint(
-                    str(self.checkpoint_dir / ckpt_name),
-                    weights_only=True
-                ) # Must be called on all ranks
+			# Save checkpoint right after sampling
+			if not last:
+				ckpt_name = f"sample-epoch={epoch}-step={trainer.global_step}.ckpt"
+				trainer.save_checkpoint(
+					str(self.checkpoint_dir / ckpt_name),
+					weights_only=True
+				) # Must be called on all ranks
 
 
 
