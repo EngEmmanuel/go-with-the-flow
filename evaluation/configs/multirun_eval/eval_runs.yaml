@@ -1,7 +1,10 @@
 run_dirs:
-  - ${paths.train_output_path}/tests/2025-11-18/18-54-47
-  - ${paths.train_output_path}/tests/2025-11-19/15-41-40
+  - ${paths.train_output_path}/sweep_final_tweaks/mean/r04/bs7
+  - ${paths.train_output_path}/sweep_final_tweaks/mean/r04/bs7cosine
+  - ${paths.train_output_path}/sweep_final_tweaks/mean/r04/gas2
+  - ${paths.train_output_path}/sweep_final_tweaks/mean/r04/cfg_5050_2k
+  - ${paths.train_output_path}/sweep_final_tweaks/mean/r04/cfg_2k_no_warmup
 
 override_old_run: true  # Whether to skip sampling if latents already exist
 n_inference_steps: [2, 4, 8, 16, 32]
-output_dir: ${paths.train_output_path}/multi_run_evaluation #/${now:%Y-%m-%d_%H-%M-%S}
+output_dir: ${paths.train_output_path}/multi_run_evaluation/${now:%Y-%m-%d_%H-%M-%S}

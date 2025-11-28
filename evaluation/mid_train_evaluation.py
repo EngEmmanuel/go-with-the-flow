@@ -451,7 +451,7 @@ class MultiRunAndStepETPWrapper(EvaluateTrainProcess):
         
         'Gets wandb project, entity, and run id from the run directory'
         project, entity, run_id = self._get_wandb_info(run_dir, wandb_dir)
-        init_kwargs = dict(project=project, entity=entity, id=run_id, resume='allow')
+        init_kwargs = dict(project=project, entity=entity, id=run_id, resume='allow', reinit=True)
         run = wandb.init(**init_kwargs)
         return run.name
 
@@ -658,7 +658,7 @@ class MultiRunAndStepETPWrapper(EvaluateTrainProcess):
         return fig, axes
 
 
-    def main(self, latents_dicts=None):
+    def main(self, latents_dicts=None, delete_latents_after=False):
         # Latent sampling
         if latents_dicts is None:
             latents_dicts = self.sample_all_latents()
@@ -688,6 +688,12 @@ class MultiRunAndStepETPWrapper(EvaluateTrainProcess):
         # Results plotting
         self.plot_metrics_vs_inf_steps(results_df)
 
+        # Delete latents
+        if not results_df.empty:
+            if delete_latents_after:
+                latent_paths = [p for d in latents_dicts for p in d['latents_dir'].glob('*.pt')]
+                self._delete_files(latent_paths)
+
             
 ###########################################################################################
 #                                           MAIN                                          #
@@ -703,13 +709,13 @@ def main(eval_ckpt_cfg: DictConfig):
                 df, 
                 task='reconstruction-nmfmax', 
                 metric='fid50k_full', 
-                top_k=3, 
+                top_k=2, 
                 smaller_is_better=True
             ),
             debug=debug
         )
 
-        multirun_eval.main()
+        multirun_eval.main(delete_latents_after=True)
 
 
 

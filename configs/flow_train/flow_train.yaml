@@ -30,7 +30,7 @@ trainer:
   loss_mask: pad
   uncond_prob: 0.0
   kwargs:
-    max_epochs: 1000
+    max_epochs: 2000
     precision: 16
     accelerator: auto
     #val_check_interval: 0.1
