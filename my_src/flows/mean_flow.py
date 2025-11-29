@@ -7,6 +7,7 @@ from torchdiffeq import odeint
 from einops import rearrange, repeat, reduce
 from my_src.custom_loss import MaskedMeanFlowLoss
 from torch.func import jvp
+from my_src.jvp_flash_attn_proc import JVPFlashAttnProcessor
 # Code adapted from https://github.com/lucidrains/rectified-flow-pytorch/blob/main/rectified_flow_pytorch/mean_flow.py
 
 from random import random
@@ -43,6 +44,7 @@ class MeanFlow(Module):
         eps = 1e-3,
         uncond_prob = 0.0,
         w = 0,
+        use_jvp_flash_attn = False
     ):
         super().__init__()
         self.model = model 
@@ -91,6 +93,11 @@ class MeanFlow(Module):
             recon_loss_weight=recon_loss_weight
         )
 
+        self.use_jvp_flash_attn = use_jvp_flash_attn
+        if self.use_jvp_flash_attn:
+            print(f'Processors before:\n {self.model.attn_processors}')
+            self.model.set_attn_processor(JVPFlashAttnProcessor())
+            print(F"Processors after:\n {self.model.attn_processors}")
 
     @property
     def device(self):
