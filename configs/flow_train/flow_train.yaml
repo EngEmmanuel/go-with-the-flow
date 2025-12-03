@@ -8,9 +8,10 @@ defaults:
 dataset:
   path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}
   normalise_latents: true
+  add_eps_to_train_latents: false
   latent_scaling_path: ${paths.data_path}/CAMUS_Latents_${vae.resolution}/CAMUS_Scaling_${vae.resolution}.pt
   max_frames: 32
-  batch_size: 5
+  batch_size: 7
   cond_pad_mask: true  # Whether to append the padding mask to the conditioning input
   masking_distribution: uniform  # Distribution to use for random masking; 'uniform' or 'geometric'
 
