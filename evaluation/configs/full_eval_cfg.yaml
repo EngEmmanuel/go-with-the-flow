@@ -10,39 +10,40 @@ real_data_path: ${paths.data_path}/CAMUS_Processed_Frames
 output_dir: ${run_dir}/evaluation
 
 run_dir: ${paths.train_output_path}/hydra_outputs/2025-10-12/21-01-13  # Path to training run output directory
-ckpt_name: last.ckpt
+ckpt_name: sample-epoch=1750-step=1400800.ckpt
 
 test_n_missing_frames: [max, 0.75, 0.5, 0.25]  # Proportion of frames to mask
 
 
 ## GENERATE LATENTS i.e. Inference parameters
+batch_size: 32
 inference_schemes:
   ef_histogram_matching:
     plan_path: ${paths.project_path}/evaluation/eval_plans/ef_histogram_matching_plan.csv  # Path to CSV file with generation plan
-    batch_size: 16
+    batch_size: ${batch_size}
     
   ef_samples_in_range:
     ef_gen_range: [0.1, 0.8]  # Range of ef_gen values to sample from uniformly
     n_ef_samples: 3  # Number of ef_gen samples per video in ef_gen_range
 
   frame_upsampling:
-    batch_size: 16
+    batch_size: ${batch_size}
 
-model_sample_kwargs:
-  guidance_scale: 1  # Classifier-free guidance scale; set to 1.0 for no guidance
+#model_sample_kwargs:
+#  guidance_scale: 1  # Classifier-free guidance scale; set to 1.0 for no guidance
 
 
 ## LATENT-TO-VIDEO PARAMETERS
 repo_id: HReynaud/EchoFlow
 types:
-  - framewise
-  - videowise
+  #- framewise
+  #- videowise
   - framewise_no_pad
-  - videowise_no_pad
-  - framewise_generated
-  - videowise_generated
-  - framewise_stitched
-  - videowise_stitched
+  #- videowise_no_pad
+  #- framewise_generated
+  #- videowise_generated
+  #- framewise_stitched
+  #- videowise_stitched
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
 queries:
   ef_histogram_matching:
