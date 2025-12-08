@@ -30,14 +30,17 @@ trainer:
   loss_mask: pad
   uncond_prob: 0.0
   kwargs:
-    max_epochs: 2000
+    max_epochs: 1000
     precision: 16
     accelerator: auto
+    #gradient_clip_val: 0.5
     #val_check_interval: 0.1
     accumulate_grad_batches: 1
     #profiler: simple
     #overfit_batches: 0.05 #debug
-
+  #optim_kwargs:
+  #  weight_decay: 1e-5
+  #  decoupled_weight_decay: true
 #ema:
 #  kwargs:
 #    decay: 0.999
@@ -60,6 +63,7 @@ ckpt:
 
   
 wandb:
+  watch: True
   init_kwargs:
     project: go-with-the-flow
     entity: engemmanuel
