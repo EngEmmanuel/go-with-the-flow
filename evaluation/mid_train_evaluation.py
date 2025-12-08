@@ -303,7 +303,7 @@ class EvaluateTrainProcess():
 
         return fig, axes
     
-    def log_results_to_wandb(self, results_df=None):
+    def log_results_to_wandb(self, results_df=None, x_axis='step'):
         """
         Log self.results_df to the W&B run:
         - Upload the results as a W&B Table.
@@ -318,6 +318,9 @@ class EvaluateTrainProcess():
             df = self.results_df.copy()
         else:
             df = results_df.copy()
+
+        app = "" if x_axis == 'step' else f"_vs_{x_axis}"
+
         # Attach to the same W&B run
         project, entity, run_id = self._get_wandb_info()
         init_kwargs = dict(project=project, entity=entity, id=run_id, resume='allow')
@@ -334,6 +337,7 @@ class EvaluateTrainProcess():
             load_last_ckpt_fn=lambda: torch.load(self._name_to_ckpt_path('last'))
         )
         df['step'] = pd.to_numeric(df['step'], errors='coerce')
+        df['epoch'] = pd.to_numeric(df['epoch'], errors='coerce')
 
         # Log the raw results as a W&B table
         table = wandb.Table(dataframe=df)
@@ -344,15 +348,16 @@ class EvaluateTrainProcess():
         metric_cols = [c for c in df.columns if c not in exclude and df[c].notna().any()]
 
         # Build W&B-generated line plots per metric, series grouped by task, x=step
+        x_col = 'epoch' if x_axis == 'epoch' else 'step'
         tasks = [t for t in df['task'].dropna().unique()]
         for metric in metric_cols:
             xs_list, ys_list, keys = [], [], []
             for task in tasks:
-                sub = df[df['task'] == task][['step', metric]].dropna(subset=['step', metric]).copy()
+                sub = df[df['task'] == task][[x_col, metric]].dropna(subset=[x_col, metric]).copy()
                 if sub.empty:
                     continue
                 # Aggregate to one value per step per task (average across 'type' etc.)
-                agg = sub.groupby('step', as_index=True)[metric].mean().sort_index()
+                agg = sub.groupby(x_col, as_index=True)[metric].mean().sort_index()
                 if agg.empty:
                     continue
                 xs_list.append(agg.index.astype(int).tolist())
@@ -365,9 +370,9 @@ class EvaluateTrainProcess():
                     ys=ys_list,
                     keys=keys,
                     title=f"{metric}",
-                    xname="step"
+                    xname=x_col
                 )
-                wandb.log({f"mid_train_evaluation/metrics/{metric}": chart})
+                wandb.log({f"mid_train_evaluation/metrics/{metric}{app}": chart})
 
         run.finish()
 
@@ -700,7 +705,7 @@ class MultiRunAndStepETPWrapper(EvaluateTrainProcess):
 ###########################################################################################
 
 
-@hydra.main(version_base=None, config_path='configs', config_name='multi_run_step_eval') #config_name='evaluate_ckpts')
+@hydra.main(version_base=None, config_path='configs',config_name='evaluate_ckpts')  #config_name='multi_run_step_eval')
 def main(eval_ckpt_cfg: DictConfig):
     def mrsetp(debug):
         multirun_eval = MultiRunAndStepETPWrapper(
@@ -740,7 +745,7 @@ def main(eval_ckpt_cfg: DictConfig):
             _log_df_to_wandb(eval_ckpt_cfg)
 
 
-    etp_flag = False
+    etp_flag = True
 
     if etp_flag:
         etp(_main=True)

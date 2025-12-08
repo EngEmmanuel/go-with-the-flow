@@ -128,7 +128,7 @@ class EchoDataset(Dataset):
             case 'uniform':
                 val = np.random.randint(1, T)
             case 'geometric':
-                p = 8/T
+                p = 3.7/T
                 val = T - np.random.geometric(p)
             case '1-frame':
                 val = max_frames_removed
@@ -205,7 +205,10 @@ class EchoDataset(Dataset):
 
         stats = self._load_video(row['video_name'])
         mu, std = stats['mu'], stats['std']  # (T, C, H, W)
-        eps = torch.randn_like(mu) if self.split != 'val' else torch.zeros_like(mu)
+
+        eps = torch.zeros_like(mu)
+        if self.cfg.dataset.get('add_eps_to_train_latents', True) and self.split == 'train':
+            eps = torch.randn_like(mu)
 
         if self.cfg.dataset.get('normalise_latents', False):
             mu, std = self.normalise_latents(mu, std)
