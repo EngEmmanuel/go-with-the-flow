@@ -14,7 +14,7 @@ class SampleAndCheckpointCallback(Callback):
 	intervals during training. Checkpoints saved in this callback contain only 
 	model weights.
 	'''
-	def __init__(self, cfg, sample_dir: Path, sample_dl, checkpoint_dir: Path, debug=False):
+	def __init__(self, cfg, sample_dir: Path, sample_dl, checkpoint_dir: Path, debug=False, device='cuda'):
 		super().__init__()
 		self.cfg = cfg
 		self.sample_dir = sample_dir
@@ -22,7 +22,7 @@ class SampleAndCheckpointCallback(Callback):
 		self.checkpoint_dir = checkpoint_dir
 		self._last_sample_epoch = 0  
 		self.debug = debug
-		
+		self.device = device
 		# Make sure dirs exist
 		self.sample_dir.mkdir(parents=True, exist_ok=True)
 		self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
@@ -34,6 +34,8 @@ class SampleAndCheckpointCallback(Callback):
 		self._sample_step(trainer, pl_module, last=True)
 
 	def _sample_step(self, trainer, pl_module, last=False):
+		pl_module.model.to(self.device)
+
 		if self.sample_dir is None or trainer.sanity_checking:
 			return
 
@@ -55,7 +57,7 @@ class SampleAndCheckpointCallback(Callback):
 					run_cfg=self.cfg,
 					epoch=epoch,
 					step=trainer.global_step,
-					device=pl_module.device,
+					device=self.device,
 					samples_dir=self.sample_dir,
 					out_name=out_name
 				)
