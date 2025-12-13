@@ -282,6 +282,11 @@ def main(cfg: DictConfig):
         except Exception as e:
             print(f"[WARN] Failed to plot metrics: {e}")
 
+        try:
+            evaluator.log_results_to_wandb(x_axis='epoch')
+        except Exception as e:
+            print(f"[WARN] Failed to log results to wandb with x_axis='epoch'")
+
 if __name__ == '__main__':
     device = select_device()
     main()

@@ -74,6 +74,8 @@ class LinearFlow(Module):
         model = self.model
         data_shape = default(data_shape, self.data_shape)
 
+        print(f'Sampling with steps={steps}, batch_size={batch_size}, guidance_scale={guidance_scale}')
+
         maybe_clip = (lambda t: t.clamp_(*self.clip_values)) if self.clip_values is not None else identity
         maybe_clip_flow = (lambda t: t.clamp_(*self.clip_flow_values)) if self.clip_flow_values is not None else identity
 
