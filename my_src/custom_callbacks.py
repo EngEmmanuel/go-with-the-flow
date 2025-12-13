@@ -6,7 +6,7 @@ from tqdm import tqdm
 from pathlib import Path
 from lightning.pytorch.callbacks import Callback
 from evaluation.ef_evaluation_schemes import UnscaleLatents
-
+from utils.train import SamplerConductor
 
 class SampleAndCheckpointCallback(Callback):
 	'''
@@ -14,7 +14,7 @@ class SampleAndCheckpointCallback(Callback):
 	intervals during training. Checkpoints saved in this callback contain only 
 	model weights.
 	'''
-	def __init__(self, cfg, sample_dir: Path, sample_dl, checkpoint_dir: Path, debug=False):
+	def __init__(self, cfg, sample_dir: Path, sample_dl, checkpoint_dir: Path, debug=False, device='cuda'):
 		super().__init__()
 		self.cfg = cfg
 		self.sample_dir = sample_dir
@@ -22,10 +22,13 @@ class SampleAndCheckpointCallback(Callback):
 		self.checkpoint_dir = checkpoint_dir
 		self._last_sample_epoch = 0  
 		self.debug = debug
-		
+		self.device = device
 		# Make sure dirs exist
 		self.sample_dir.mkdir(parents=True, exist_ok=True)
 		self.checkpoint_dir.mkdir(parents=True, exist_ok=True)
+
+		self.conductor = SamplerConductor(cfg)
+		print(f'SamplingAndCheckpointCallback initialised on {self.device}.')
 
 	def on_validation_epoch_end(self, trainer, pl_module):
 		self._sample_step(trainer, pl_module)
@@ -34,16 +37,18 @@ class SampleAndCheckpointCallback(Callback):
 		self._sample_step(trainer, pl_module, last=True)
 
 	def _sample_step(self, trainer, pl_module, last=False):
+		pl_module.model.to(self.device)
+
 		if self.sample_dir is None or trainer.sanity_checking:
 			return
 
 		epoch = trainer.current_epoch
-		is_sample_step = (
-			epoch % self.cfg.sample.every_n_epochs == 0
-			and epoch != self._last_sample_epoch
+
+		is_sample_step = self.conductor.is_sample_step(
+			epoch=epoch,
+			last_sample_epoch=self._last_sample_epoch,
+			last_step=last
 		)
-		if last:
-			is_sample_step = True
 
 		if is_sample_step:
 			if trainer.is_global_zero:
@@ -54,11 +59,11 @@ class SampleAndCheckpointCallback(Callback):
 					run_cfg=self.cfg,
 					epoch=epoch,
 					step=trainer.global_step,
-					device=pl_module.device,
+					device=self.device,
 					samples_dir=self.sample_dir,
 					out_name=out_name
 				)
-
+				print('Sampling completed at epoch:', epoch)
 				self._last_sample_epoch = epoch
 
 			trainer.strategy.barrier()  # Ensure all processes sync here
@@ -181,7 +186,6 @@ def sample_latents_from_model(model, dl_list, run_cfg, epoch, step, device, samp
 			
 	
 
-
 	df = pd.DataFrame(metadata_df_rows)
 	df.to_csv(samples_dir / 'metadata.csv', index=False)
 
@@ -193,5 +197,5 @@ def sample_latents_from_model(model, dl_list, run_cfg, epoch, step, device, samp
 		f"Sampling summary: epoch={epoch}, step={step}, dls={len(dl_list)}, "
 		f"videos_saved={_saved}, time={_elapsed / 60:.2f}m, rate={throughput:.2f} vids/s, out='{samples_dir}'"
 	)
-
+      
 	return samples_dir

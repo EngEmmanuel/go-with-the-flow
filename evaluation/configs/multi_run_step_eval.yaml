@@ -1,9 +1,31 @@
-#@package _global_
+# @package _global_
+defaults:
+  - _self_ # First takes priority so any properties redefined here take precedence
+  - paths: ibme # Simply override in cli call
+  - multirun_eval: eval_runs
 
-run_dirs:
-  - ${paths.train_output_path}/experiments/2025-11-20/15-30-00
-  - ${paths.train_output_path}/experiments/2025-11-20/16-00-00
-  - ${paths.train_output_path}/experiments/2025-11-20/16-30-00
 
-n_inference_steps: [2, 4, 8, 16, 32]
-output_dir: ./multi_run_evaluation
+real_data_path: ${paths.data_path}/CAMUS_Processed_Frames #_Temp_2 #Frames
+repo_id: HReynaud/EchoFlow
+fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
+
+
+run_dir: ${paths.train_output_path}/tests/2025-11-18/18-54-47
+output_dir: ${run_dir}/mid_train_evaluation
+
+
+types:
+  #- framewise
+  #- videowise
+  - framewise_no_pad
+  #- videowise_no_pad
+  #- framewise_generated
+  #- videowise_generated
+  #- framewise_stitched
+  #- videowise_stitched
+
+metrics:
+  real_glob: ['*']            # glob pattern to match real videos
+  fake_glob: ['*']            # glob pattern to match generated videos
+  pairwise_metrics: [ssim, psnr, lpips_vgg, mae, mse]  # metrics to compute
+  stylegan_metrics: [fid50k_full, fvd2048_10f]

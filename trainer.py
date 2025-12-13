@@ -1,20 +1,20 @@
 import torch
 import hydra
-from omegaconf import DictConfig, OmegaConf
-from datetime import datetime, timezone
 import torch.optim as optim
-from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, LinearLR, SequentialLR
-from torch.utils.data import DataLoader
 from pathlib import Path
+from datetime import datetime, timezone
+from omegaconf import DictConfig, OmegaConf
+from torch.utils.data import DataLoader
+from torch.optim.lr_scheduler import CosineAnnealingLR, LambdaLR, LinearLR, SequentialLR
 
 from lightning import LightningModule, Trainer
 from lightning.pytorch.loggers import WandbLogger
 from lightning.pytorch.callbacks import ModelCheckpoint, LearningRateMonitor
 
-from my_src.custom_callbacks import SampleAndCheckpointCallback
 from dataset.testdataset import FlowTestDataset
 from dataset.echodataset import EchoDataset
 from dataset import default_eval_collate
+from my_src.custom_callbacks import SampleAndCheckpointCallback
 from utils.ema import EMAWeightAveraging
 from utils.train import load_model, load_flow
 
@@ -89,7 +89,11 @@ class FlowVideoGenerator(LightningModule):
         total_epochs = int(self.cfg.trainer.kwargs.max_epochs)
         lr = self.cfg.trainer.lr
 
-        optimizer = optim.Adam(self.parameters(), lr = lr)
+        optimizer = optim.Adam(self.parameters(), lr = lr, **self.cfg.trainer.get('optim_kwargs', {}))
+
+         # Setup LR scheduler
+         # Supports: constant (no scheduler), cosineannealing, linear_decay
+         # with optional linear warmup
 
         match self.cfg.trainer.get('lr_scheduler', None):
             case None: # constant lr
@@ -220,7 +224,8 @@ def main(cfg: DictConfig):
                 cfg=cfg,
                 sample_dir=sample_dir,
                 sample_dl=sample_dl,
-                checkpoint_dir=ckpt_dir
+                checkpoint_dir=ckpt_dir,
+                device=device,
             )
         )
 
@@ -238,6 +243,9 @@ def main(cfg: DictConfig):
             save_dir=str(output_dir),
             config=config
         )
+
+        if cfg.wandb.get('watch', False):
+            logger.watch(model, log="all")
 
     # Instantiate trainers
     trainer = Trainer(
@@ -273,6 +281,11 @@ def main(cfg: DictConfig):
             evaluator.plot_metrics()
         except Exception as e:
             print(f"[WARN] Failed to plot metrics: {e}")
+
+        try:
+            evaluator.log_results_to_wandb(x_axis='epoch')
+        except Exception as e:
+            print(f"[WARN] Failed to log results to wandb with x_axis='epoch'")
 
 if __name__ == '__main__':
     device = select_device()

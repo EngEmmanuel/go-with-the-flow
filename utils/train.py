@@ -47,3 +47,53 @@ def load_vae_processor(cfg, device):
         device=device
     )
     return vae, processor
+
+
+
+class SamplerConductor():
+    def __init__(self, run_cfg):
+        self.max_epochs = run_cfg.trainer.kwargs.max_epochs
+        self.sample_every_n_epochs = run_cfg.sample.get('every_n_epochs', self.max_epochs)
+        self.last_sample_epoch = 0
+
+        self.roi_freq_multiplier = 2
+        self.scheduler = run_cfg.trainer.get('lr_scheduler', None)
+
+    def is_sample_step(
+            self,
+            epoch, 
+            last_sample_epoch,
+            last_step
+        ):
+
+        # Always sample at the last step
+        if last_step:
+            return True
+        
+        epoch_freq = self.sample_every_n_epochs
+        progress = epoch / self.max_epochs
+        if self.scheduler == 'cosineannealing':
+            roi = (0.4, 0.55) # roi for mean flow
+            if progress >= roi[0] and progress <= roi[1]:
+                epoch_freq = self.sample_every_n_epochs // self.roi_freq_multiplier
+                print(f'temp In ROI {roi}, sampling every {epoch_freq} epochs')
+
+            return (
+                epoch % epoch_freq == 0
+                and epoch != last_sample_epoch
+            )
+        
+        elif self.scheduler is None: # replace with linear decay roi
+            return (
+                epoch % self.sample_every_n_epochs == 0
+                and epoch != last_sample_epoch
+		    )
+        
+        else:
+            return (
+                epoch % self.sample_every_n_epochs == 0
+                and epoch != last_sample_epoch
+		    )
+
+
+    

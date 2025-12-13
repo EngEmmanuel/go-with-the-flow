@@ -232,6 +232,7 @@ def convert_latents_directory(
     cfg = _load_cfg(run_dir)
     subfolder = f"vae/avae-{cfg.vae.resolution}"
     device = device or select_device()
+    print(f"[info] Loading VAE from repo '{repo_id}' subfolder '{subfolder}' on device {device}")
     vae, _ = load_vae_and_processor(vae_locator=repo_id, subfolder=subfolder, device=device)
 
     # Load metadata and filter
