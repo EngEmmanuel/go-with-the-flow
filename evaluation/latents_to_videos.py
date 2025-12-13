@@ -52,13 +52,18 @@ def _get_fps(video_name: str, default_fps: int, fps_map: Optional[Dict[str, floa
     return float(default_fps)
 
 
-def _save_frames(decoded_T3HW: torch.Tensor, out_dir: Path):
+def _save_frames(decoded_T3HW: torch.Tensor, out_dir: Path, grayscale: bool = False):
     out_dir.mkdir(parents=True, exist_ok=True)
     T = decoded_T3HW.shape[0]
     for t in range(T):
         frame = decoded_T3HW[t]  # (3, H, W) in [0,1]
-        arr = (frame.clamp(0, 1).permute(1, 2, 0).numpy() * 255.0).astype(np.uint8)
-        Image.fromarray(arr).save(out_dir / f"frame_{t}.png")
+        if grayscale:
+            gray = (0.2989 * frame[0] + 0.5870 * frame[1] + 0.1140 * frame[2]).numpy()  # H, W
+            arr = (gray*255.0).astype(np.uint8)
+            Image.fromarray(arr, mode='L').save(out_dir / f"frame_{t}.png")
+        else:
+            arr = (frame.clamp(0, 1).permute(1, 2, 0).numpy() * 255.0).astype(np.uint8)
+            Image.fromarray(arr).save(out_dir / f"frame_{t}.png")
 
 
 def _load_real_frames_T3HW(real_dir: Path, resize_to: Optional[Tuple[int, int]] = None) -> torch.Tensor:
@@ -97,7 +102,7 @@ def _resample_T3HW(frames_T3HW: torch.Tensor, target_length: int) -> torch.Tenso
     return frames_T3HW[idx]
 
 
-def _make_video_with_ffmpeg(frames_dir: Path, out_path: Path, fps: float) -> bool:
+def _make_video_with_ffmpeg(frames_dir: Path, out_path: Path, fps: float, grayscale: bool = False) -> bool:
     """Create a video from PNG frames using ffmpeg's glob pattern.
 
     Build a video from frames named frame_0.png, frame_1.png, ... (contiguous from 0).
@@ -114,7 +119,12 @@ def _make_video_with_ffmpeg(frames_dir: Path, out_path: Path, fps: float) -> boo
         "-loglevel", "error",
         "-framerate", str(fps),
         "-start_number", "0",
-        "-i", str((frames_dir / "frame_%d.png").as_posix()),
+        "-i", str((frames_dir / "frame_%d.png").as_posix())
+    ]
+    if grayscale:
+        cmd += ["-vf", "format=gray"]
+
+    cmd += [
         "-c:v", "libx264",
         "-pix_fmt", "yuv420p",
         "-vsync", "cfr",
@@ -181,7 +191,7 @@ def _apply_mask_select_TCHW(frames_TCHW: torch.Tensor, mask_list: List[float], i
         return frames_TCHW[:0]  # empty tensor with correct dims
     return frames_TCHW[keep]
 
-
+#TODO Test it works as expected after the addition of grayscale option
 def convert_latents_directory(
     real_data_path: Path,
     latents_dir: Path,
@@ -195,6 +205,7 @@ def convert_latents_directory(
     decode_batch_size: int = 32,
     device: Optional[torch.device] = None,
     debugging: bool = False,
+    grayscale: bool = False,
     test_n: Optional[int] = None
 ):
     """Convert latent videos saved by evaluate_to_latents to videos/frames.
@@ -295,13 +306,13 @@ def convert_latents_directory(
         if "framewise" in types:
             out_frames_dir_base_fake = output_dir / "framewise" / "fake" / video_name
             out_frames_dir_base_real = output_dir / "framewise" / "real" / real_video_name
-            _save_frames(decoded_base, out_frames_dir_base_fake)
-            _save_frames(real_T3HW_resampled, out_frames_dir_base_real)
+            _save_frames(decoded_base, out_frames_dir_base_fake, grayscale=grayscale)
+            _save_frames(real_T3HW_resampled, out_frames_dir_base_real, grayscale=grayscale)
 
             if "videowise" in types:
                 # base
                 out_video_path = (output_dir / "videowise" / video_name).with_suffix(".mp4")
-                _make_video_with_ffmpeg(out_frames_dir_base_fake, out_video_path, fps=video_fps)
+                _make_video_with_ffmpeg(out_frames_dir_base_fake, out_video_path, fps=video_fps, grayscale=grayscale)
 
         # Stitched video: use stored stitched latents if available
         stitched_T3HW = None
@@ -311,17 +322,17 @@ def convert_latents_directory(
             stitched_T3HW = _decode_frames_with_vae(vae, stitched_TCHW, batch_size=decode_batch_size)
 
             out_frames_dir_stitched_fake = output_dir / "framewise_stitched" / "fake" / video_name
-            _save_frames(stitched_T3HW, out_frames_dir_stitched_fake)
+            _save_frames(stitched_T3HW, out_frames_dir_stitched_fake, grayscale=grayscale)
 
             # Real counterpart for stitched: real frames with padding removed (not_pad_mask > 0.5)
             keep = torch.tensor(not_pad_mask_list, dtype=torch.float32) > 0.5
             real_stitched = real_T3HW_resampled[keep]
             out_frames_dir_stitched_real = output_dir / "framewise_stitched" / "real" / real_video_name
-            _save_frames(real_stitched, out_frames_dir_stitched_real)
+            _save_frames(real_stitched, out_frames_dir_stitched_real, grayscale=grayscale)
 
             if "videowise_stitched" in types:
                 out_video_path_stitched = (output_dir / "videowise_stitched" / video_name).with_suffix(".mp4")
-                _make_video_with_ffmpeg(out_frames_dir_stitched_fake, out_video_path_stitched, fps=video_fps)
+                _make_video_with_ffmpeg(out_frames_dir_stitched_fake, out_video_path_stitched, fps=video_fps, grayscale=grayscale)
 
         if "framewise_no_pad" in types:
             # No-pad video: mask keep of not_pad_mask
@@ -331,17 +342,16 @@ def convert_latents_directory(
             #decoded_no_pad = _decode_frames_with_vae(vae, no_pad_TCHW, batch_size=decode_batch_size) if no_pad_TCHW.shape[0] > 0 else no_pad_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
 
             out_frames_dir_no_pad_fake = output_dir / "framewise_no_pad" / "fake" / video_name
-            _save_frames(decoded_no_pad, out_frames_dir_no_pad_fake)
+            _save_frames(decoded_no_pad, out_frames_dir_no_pad_fake, grayscale=grayscale)
             # Real counterpart: resampled real then apply not_pad_mask keep
             keep_np = torch.tensor(not_pad_mask_list, dtype=torch.float32) > 0.5
             real_no_pad = real_T3HW_resampled[keep_np]
             out_frames_dir_no_pad_real = output_dir / "framewise_no_pad" / "real" / real_video_name
-            _save_frames(real_no_pad, out_frames_dir_no_pad_real)
+            _save_frames(real_no_pad, out_frames_dir_no_pad_real, grayscale=grayscale)
 
             if "videowise_no_pad" in types:
                 out_video_path_no_pad = (output_dir / "videowise_no_pad" / video_name).with_suffix(".mp4")
-                _make_video_with_ffmpeg(out_frames_dir_no_pad_fake, out_video_path_no_pad, fps=video_fps)
-
+                _make_video_with_ffmpeg(out_frames_dir_no_pad_fake, out_video_path_no_pad, fps=video_fps, grayscale=grayscale)
         if "framewise_generated" in types:
             # Generated-only video: mask keep of NOT observed_mask
             
@@ -353,17 +363,17 @@ def convert_latents_directory(
             #decoded_generated = _decode_frames_with_vae(vae, generated_TCHW, batch_size=decode_batch_size) if generated_TCHW.shape[0] > 0 else generated_TCHW.new_zeros((0, 3,)+tuple(frames_TCHW.shape[-2:]))
             
             out_frames_dir_generated_fake = output_dir / "framewise_generated" / "fake" / video_name
-            _save_frames(decoded_generated, out_frames_dir_generated_fake)
+            _save_frames(decoded_generated, out_frames_dir_generated_fake, grayscale=grayscale)
             # Real counterpart: resampled real then apply NOT observed_mask (hidden frames)
             keep_gen = torch.tensor(generated_mask_list, dtype=torch.float32) >= 0.5
             real_generated = real_T3HW_resampled[keep_gen]
             out_frames_dir_generated_real = output_dir / "framewise_generated" / "real" / real_video_name
-            _save_frames(real_generated, out_frames_dir_generated_real)
+            _save_frames(real_generated, out_frames_dir_generated_real, grayscale=grayscale)
 
             if "videowise_generated" in types:
                 # generated
                 out_video_path_generated = (output_dir / "videowise_generated" / video_name).with_suffix(".mp4")
-                _make_video_with_ffmpeg(out_frames_dir_generated_fake, out_video_path_generated, fps=video_fps)
+                _make_video_with_ffmpeg(out_frames_dir_generated_fake, out_video_path_generated, fps=video_fps, grayscale=grayscale)
 
     df.to_csv(output_dir / 'metadata.csv', index=False)
     print(f"[done] Outputs saved under: {output_dir}")
