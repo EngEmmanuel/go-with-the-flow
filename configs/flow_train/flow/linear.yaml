@@ -4,4 +4,4 @@ kwargs:
   clip_flow_values: null # [-.inf, .inf] 
 
 sample_kwargs:
-  steps: 1
+  steps: 24
