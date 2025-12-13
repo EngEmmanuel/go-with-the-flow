@@ -376,13 +376,13 @@ class EvaluateTrainProcess():
 
         run.finish()
 
-def _log_df_to_wandb(eval_ckpt_cfg):
+def _log_df_to_wandb(eval_ckpt_cfg, x_axis='step'):
     df_path = Path(eval_ckpt_cfg.run_dir) / "sample_videos" / "mid_train_evaluation_results" / "all_checkpoints_results.csv"
     if not df_path.exists():
         raise FileNotFoundError(f"Results file not found: {df_path}")
     
     df = pd.read_csv(df_path)
-    EvaluateTrainProcess(eval_ckpt_cfg).log_results_to_wandb(df)
+    EvaluateTrainProcess(eval_ckpt_cfg).log_results_to_wandb(df, x_axis=x_axis)
 
 
 
@@ -731,10 +731,12 @@ def main(eval_ckpt_cfg: DictConfig):
             print("Final Results DataFrame:\n", df)
 
             # Log to wandb
-            try:
-                evaluator.log_results_to_wandb()
-            except Exception as e:
-                print(f"[WARN] Failed to log results to wandb: {e}")
+            for axis in ['epoch', 'step']:
+                try:
+                    evaluator.log_results_to_wandb(x_axis=axis)
+                except Exception as e:
+                    print(f"[WARN] Failed to log results to wandb with x_axis='{axis}': {e}")
+
             
             # Plot metrics
             try:
