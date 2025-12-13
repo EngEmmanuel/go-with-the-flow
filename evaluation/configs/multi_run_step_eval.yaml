@@ -1,0 +1,9 @@
+#@package _global_
+
+run_dirs:
+  - ${paths.train_output_path}/experiments/2025-11-20/15-30-00
+  - ${paths.train_output_path}/experiments/2025-11-20/16-00-00
+  - ${paths.train_output_path}/experiments/2025-11-20/16-30-00
+
+n_inference_steps: [2, 4, 8, 16, 32]
+output_dir: ./multi_run_evaluation
