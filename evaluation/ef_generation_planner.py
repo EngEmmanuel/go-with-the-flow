@@ -45,6 +45,77 @@ def basic_stats(x: pd.Series) -> Dict[str, float]:
     }
 
 
+# ---------- EF sampler class -------------------------------------------------
+
+@dataclass
+class EFSampler:
+    """
+        Loads metadata.csv, filters by split, and generates new EF values via controlled perturbations.
+
+        Strategy:
+            1) Sample EF ~ U[min_ef, max_ef] (bounds from TRAIN/VAL)
+            2) Accept only if |EF_sampled - EF_original| > min_diff; otherwise resample
+            3) Save result to CSV
+    """
+    metadata_path: Path
+    ef_col: str = "EF_Area"
+    split_col: str = "split"
+    min_diff: float = 0.0
+    splits_for_bounds: List[str] = field(default_factory=lambda: ["TRAIN", "VAL"])  # which splits define min/max EF
+    random_state: int = 0
+
+    def __post_init__(self):
+        self.metadata_path = Path(self.metadata_path)
+        self.df = pd.read_csv(self.metadata_path)
+        self.rng = np.random.RandomState(self.random_state)
+        self._compute_ef_bounds()
+
+    def _compute_ef_bounds(self) -> None:
+        """Compute min/max EF from specified splits."""
+        mask = self.df[self.split_col].isin(self.splits_for_bounds)
+        ef_vals = pd.to_numeric(self.df.loc[mask, self.ef_col], errors="coerce").dropna()
+        self.min_ef = float(ef_vals.min())
+        self.max_ef = float(ef_vals.max())
+
+    def sample_new_ef(self, ef_original: float) -> float:
+        """
+        Sample new EF value:
+            - EF_sampled ~ U[min_ef, max_ef] (integer sampling)
+            - Require |EF_sampled - EF_original| > min_diff; otherwise resample
+        """
+        min_ef_int = int(np.ceil(self.min_ef))
+        max_ef_int = int(np.floor(self.max_ef))
+        
+        while True:
+            sampled = self.rng.randint(min_ef_int, max_ef_int + 1)
+            if abs(sampled - ef_original) > self.min_diff:
+                return float(sampled)
+
+
+    def generate_and_save(self, split: Optional[str] = None, output_path: Optional[Path] = None) -> pd.DataFrame:
+        """
+        Generate new EF values for rows matching split (or all if split=None).
+        Save result to output_path. Return the modified DataFrame (filtered to split only).
+        """
+        # Filter to the split of interest
+        if split is not None:
+            df_out = self.df.loc[self.df[self.split_col] == split].copy()
+        else:
+            df_out = self.df.copy()
+        
+        # Sample new EF for all rows in the filtered dataframe
+        df_out[self.ef_col] = df_out[self.ef_col].apply(
+            lambda ef: self.sample_new_ef(float(ef)) if pd.notna(ef) else ef
+        )
+        
+        if output_path is not None:
+            output_path = Path(output_path)
+            output_path.parent.mkdir(parents=True, exist_ok=True)
+            df_out.to_csv(output_path, index=False)
+        
+        return df_out
+
+
 # ---------- planner class -----------------------------------------------------
 
 @dataclass
@@ -340,47 +411,80 @@ class EFGenerationPlanner:
 if __name__ == "__main__":
     metadata_path = Path("./data/CAMUS_Processed_Frames/metadata.csv")
     df = pd.read_csv(metadata_path)
+    HISTOGRAM = False
+    SAMPLER = True
 
-    planner = EFGenerationPlanner(
-        df=df,
-        n_bins=5,
-        ef_col="EF_Area",
-        video_col="video_name",
-        patient_col_out="patient_id",
-        nbframe_col="NbFrame",
-        split_for_bins="TEST",     # define bins/medians on TEST split
-        plan_on_split="TEST",      # build selection plan on TEST split
-        window_size=10,
-        max_overlap=0.5,           # ≤50% overlap ⇒ stride 5
-        delta=5.0,                 # require |EF - bin_median| >= 5
-        random_state=0,
-        allow_replacement=False,
-        match_strategy="match_real_windows",  # or "fixed_sources"
-        fixed_sources_per_bin=None
-    )
-
-    df_binned, plan_df, summary_df, summaries = planner.run()
-
-    plan_df.to_csv("./evaluation/eval_plans/ef_histogram_matching_plan.csv", index=False)
-
-    print("\n== Bin edges ==")
-    print(planner.edges_)
-    print("\n== Bin medians ==")
-    print(planner.medians_df_)
-    print("\n== Per-bin summary ==")
-    print(summary_df)
-
-    n = 30
-    print(f"\n== Generation plan (first {n} rows) ==")
-    print(plan_df.head(n))
+    if SAMPLER:
+        split = 'val'
+        ef_col="EF_Area"
+        output_path = f"./evaluation/eval_plans/{split.lower()}_ef_gen_metadata.csv"
 
 
-    print("\n== Real EF stats ==")
-    print(summaries["real_stats"])
-    print("\n== Synthetic (target) EF stats ==")
-    print(summaries["synthetic_stats"])
+        sampler = EFSampler(
+            metadata_path=metadata_path,
+            ef_col=ef_col,
+            split_col="split",
+            min_diff=5.0,
+            splits_for_bounds=["TRAIN", "VAL"],
+            random_state=0
+        )
 
-    print("\n== Real EF ASCII histogram ==")
-    print(summaries["real_histogram"])
-    print("\n== Synthetic EF ASCII histogram ==")
-    print(summaries["synthetic_histogram"])
+        df_sampled = sampler.generate_and_save(
+            split=split.upper(),
+            output_path=output_path
+        )
+
+        print(f"\n== Original vs Sampled EF stats ({split.upper()} split) ==")
+        original_stats = basic_stats(pd.to_numeric(df.loc[df["split"] == split.upper(), ef_col], errors="coerce"))
+        sampled_stats = basic_stats(pd.to_numeric(df_sampled.loc[df_sampled["split"] == split.upper(), ef_col], errors="coerce"))
+        print("Original EF stats:", original_stats)
+        print("Sampled EF stats:", sampled_stats)
+
+
+
+
+    # OLD APPROACH. DIDN'T USE EVERY DATUM AND REPEATED SOME UNEVENLY.
+    if HISTOGRAM:
+        planner = EFGenerationPlanner(
+            df=df,
+            n_bins=5,
+            ef_col=ef_col,
+            video_col="video_name",
+            patient_col_out="patient_id",
+            nbframe_col="NbFrame",
+            split_for_bins="TEST",     # define bins/medians on TEST split
+            plan_on_split="TEST",      # build selection plan on TEST split
+            window_size=10,
+            max_overlap=0.5,           # ≤50% overlap ⇒ stride 5
+            delta=5.0,                 # require |EF - bin_median| >= 5
+            random_state=0,
+            allow_replacement=False,
+            match_strategy="match_real_windows",  # or "fixed_sources"
+            fixed_sources_per_bin=None
+        )
+
+        df_binned, plan_df, summary_df, summaries = planner.run()
+
+        plan_df.to_csv("./evaluation/eval_plans/play_plan.csv", index=False)
+
+        print("\n== Bin edges ==")
+        print(planner.edges_)
+        print("\n== Bin medians ==")
+        print(planner.medians_df_)
+        print("\n== Per-bin summary ==")
+        print(summary_df)
+
+        n = 10
+        print(f"\n== Generation plan (first {n} rows) ==")
+        print(plan_df.head(n))
+
+
+        print("\n== Real EF stats ==")
+        print(summaries["real_stats"])
+        print("\n== Synthetic (target) EF stats ==")
+        print(summaries["synthetic_stats"])
+
+        print("\n== Real EF ASCII histogram ==")
+        print(summaries["real_histogram"])
+        print("\n== Synthetic EF ASCII histogram ==")
+        print(summaries["synthetic_histogram"])

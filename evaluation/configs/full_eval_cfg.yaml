@@ -45,7 +45,7 @@ types:
   #- framewise_stitched
   #- videowise_stitched
 fps_metadata_csv: ${paths.data_path}/CAMUS_Latents_{vae_res}/metadata.csv # CSV with video_name and FPS column to override default FPS
-queries:
+queries: #can omit bin condition, right?
   ef_histogram_matching:
     generation_nmfmax_bin0: 'n_missing_frames == "max" and target_ef_bin == 0'
     generation_nmfmax_bin1: 'n_missing_frames == "max" and target_ef_bin == 1'

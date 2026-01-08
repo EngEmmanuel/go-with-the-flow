@@ -26,7 +26,7 @@ print_line_rule = lambda: print('\n'*2, '-'*150, flush=True)
 
 
 
-@hydra.main(version_base=None, config_path="configs", config_name="debug_full_eval_cfg")
+@hydra.main(version_base=None, config_path="configs", config_name="mini_inference_cfg") #debug_full_eval_cfg")
 def main(eval_cfg: DictConfig):
     tasks = set(eval_cfg.get("tasks", []))
     if not tasks:
@@ -110,6 +110,7 @@ def main(eval_cfg: DictConfig):
                     fps_metadata_csv=str(eval_cfg.fps_metadata_csv) if eval_cfg.get("fps_metadata_csv", None) else None,
                     device=device,
                     debugging=eval_cfg.get('debugging', False),
+                    grayscale=eval_cfg.get('grayscale', False),
                 )
                 decoded_videos_dirs[scheme_name][name] = decoded_videos_dir
 
